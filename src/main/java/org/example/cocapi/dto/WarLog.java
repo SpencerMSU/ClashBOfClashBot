@@ -32,7 +32,6 @@ public class WarLog {
         private int stars;
         private double destructionPercentage;
 
-        // Getters
         public String getTag() { return tag; }
         public String getName() { return name; }
         public int getStars() { return stars; }
