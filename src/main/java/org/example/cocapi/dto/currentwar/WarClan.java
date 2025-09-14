@@ -9,7 +9,6 @@ public class WarClan {
     private String name;
     private int stars;
     private double destructionPercentage;
-    private int attacksPerMember; // <-- НЕДОСТАЮЩЕЕ ПОЛЕ
     private List<WarMember> members;
 
     // Getters
@@ -17,6 +16,5 @@ public class WarClan {
     public String getName() { return name; }
     public int getStars() { return stars; }
     public double getDestructionPercentage() { return destructionPercentage; }
-    public int getAttacksPerMember() { return attacksPerMember; } // <-- НЕДОСТАЮЩИЙ МЕТОД
     public List<WarMember> getMembers() { return members; }
 }
