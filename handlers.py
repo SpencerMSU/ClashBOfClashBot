@@ -3,7 +3,7 @@
 """
 import logging
 from typing import Dict, Any, Optional
-from telegram import Update, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
@@ -42,6 +42,21 @@ class MessageHandler:
         """Обработка сообщения в состоянии ожидания ввода"""
         chat_id = update.effective_chat.id
         
+        # Проверяем, не является ли введенный текст командой меню
+        # Если да, то очищаем состояние и обрабатываем как команду меню
+        if (text == Keyboards.MY_CLAN_BTN or
+            text == Keyboards.PROFILE_BTN or
+            text == Keyboards.CLAN_BTN or
+            text == Keyboards.BACK_BTN or
+            text == Keyboards.BACK_TO_CLAN_MENU_BTN or
+            text == Keyboards.NOTIFICATIONS_BTN or
+            text == Keyboards.SUBSCRIPTION_BTN or
+            text.startswith(Keyboards.MY_PROFILE_PREFIX)):
+            # Очищаем состояние и обрабатываем как команду меню
+            context.user_data.pop('state', None)
+            await self._handle_menu_command(update, context, text)
+            return
+
         # Форматируем тег
         tag = format_player_tag(text) if 'PLAYER' in state.value else format_clan_tag(text)
         
@@ -154,9 +169,6 @@ class CallbackHandler:
             return
         
         data_parts = query.data.split(":")
-        if len(data_parts) < 2:
-            return
-        
         callback_type = data_parts[0]
         chat_id = query.message.chat_id
         message_id = query.message.message_id
@@ -205,7 +217,11 @@ class CallbackHandler:
                 await query.edit_message_text("Главное меню:")
                 await query.message.reply_text("Выберите действие:", 
                                               reply_markup=Keyboards.main_menu())
-        
+
+            else:
+                logger.warning(f"Неизвестный callback тип: {callback_type}")
+                await query.edit_message_text("❌ Неизвестная команда.")
+
         except Exception as e:
             logger.error(f"Ошибка при обработке callback '{query.data}': {e}")
             await query.edit_message_text("Произошла ошибка при обработке запроса.")
@@ -268,7 +284,7 @@ class CallbackHandler:
     
     async def _handle_war_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
                               data_parts: list):
-        """Обработка детальной информации о войне"""
+        """Обраб��тка детальной информации о войне"""
         if len(data_parts) < 3:
             return
         
@@ -287,7 +303,7 @@ class CallbackHandler:
         
         player_tag = data_parts[1]
         
-        # Создаем кнопку "назад к участникам" если профиль просматривается из списка участников
+        # Со��даем кнопку "назад к участникам" если профиль просматривается из списка участников
         back_keyboard = None
         inspecting_clan = context.user_data.get('inspecting_clan')
         if inspecting_clan:
@@ -303,7 +319,7 @@ class CallbackHandler:
         )
     
     async def _handle_clan_info_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработка возврата к информации о клане"""
+        """Обраб��тка возврат�� к информации о клане"""
         clan_tag = context.user_data.get('inspecting_clan')
         if clan_tag:
             # Получаем информацию о клане заново и отображаем
