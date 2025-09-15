@@ -1,0 +1,12 @@
+# Telegram Bot Configuration
+bot.token=YOUR_BOT_TOKEN_HERE
+bot.username=YOUR_BOT_USERNAME_HERE
+
+# Clash of Clans API Configuration
+coc.api.token=YOUR_COC_API_TOKEN_HERE
+
+# Application Configuration
+# Paths configuration (can be overridden by system properties)
+app.htmls.directory=data/htmls
+app.output.json=data/war_data.json
+app.clan.tag=#2PQU0PLJ2

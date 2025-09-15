@@ -36,4 +36,10 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### Application specific ###
 /src/main/resources/config.properties
+/data/
+clashbot.db
+*.log
+msedgedriver.exe

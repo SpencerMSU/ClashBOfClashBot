@@ -2,6 +2,7 @@ package org.example;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import org.example.config.BotConfig;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -11,24 +12,33 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-// Основной класс для запуска конвертации
+/**
+ * Основной класс для конвертации HTML файлов войн в JSON формат
+ */
 public class HtmlToJsonConverter {
 
     public static void main(String[] args) {
-        // --- ПУТИ К ПАПКАМ (как вы указали) ---
-        String htmlsDirectoryPath = "C:\\Users\\SpencerMSU\\Documents\\TG_bots\\ClanBot\\MainPr\\src\\main\\resources\\htmls";
-        String outputJsonPath = "C:\\Users\\SpencerMSU\\Documents\\TG_bots\\ClanBot\\MainPr\\src\\main\\resources\\war_data.json";
+        // Используем конфигурацию вместо хардкода
+        String htmlsDirectoryPath = BotConfig.HTMLS_DIRECTORY;
+        String outputJsonPath = BotConfig.OUTPUT_JSON;
+        
+        // Создаем директории если они не существуют
+        ensureDirectoryExists(htmlsDirectoryPath);
+        ensureDirectoryExists(Paths.get(outputJsonPath).getParent().toString());
 
         File htmlsDir = new File(htmlsDirectoryPath);
-        File[] htmlFiles = htmlsDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".html") || name.toLowerCase().endsWith(".mhtml"));
+        File[] htmlFiles = htmlsDir.listFiles((dir, name) -> 
+            name.toLowerCase().endsWith(".html") || name.toLowerCase().endsWith(".mhtml"));
 
         if (htmlFiles == null || htmlFiles.length == 0) {
             System.out.println("HTML файлы не найдены в директории: " + htmlsDirectoryPath);
+            System.out.println("Убедитесь, что директория существует и содержит HTML файлы войн.");
             return;
         }
 
@@ -37,6 +47,7 @@ public class HtmlToJsonConverter {
         // Обрабатываем каждый HTML файл
         for (File file : htmlFiles) {
             try {
+                System.out.println("Обрабатываем файл: " + file.getName());
                 String content = new String(Files.readAllBytes(Paths.get(file.getAbsolutePath())));
                 Document doc = Jsoup.parse(content);
 
@@ -53,6 +64,26 @@ public class HtmlToJsonConverter {
         // Сохраняем результат в JSON
         saveToJson(warData, outputJsonPath);
         System.out.println("Данные успешно сохранены в " + outputJsonPath);
+    }
+
+    /**
+     * Обеспечивает существование директории, создавая её при необходимости
+     * @param directoryPath путь к директории
+     */
+    private static void ensureDirectoryExists(String directoryPath) {
+        if (directoryPath == null || directoryPath.trim().isEmpty()) {
+            return;
+        }
+        
+        try {
+            Path path = Paths.get(directoryPath);
+            if (!Files.exists(path)) {
+                Files.createDirectories(path);
+                System.out.println("Создана директория: " + directoryPath);
+            }
+        } catch (IOException e) {
+            System.err.println("Ошибка при создании директории " + directoryPath + ": " + e.getMessage());
+        }
     }
 
     /**
