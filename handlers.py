@@ -381,6 +381,12 @@ class CallbackHandler:
             elif callback_type == Keyboards.NOTIFY_ADVANCED_CALLBACK:
                 await self._handle_notify_advanced(update, context)
             
+            elif callback_type == Keyboards.BUILDING_TRACKER_CALLBACK:
+                await self._handle_building_tracker(update, context)
+            
+            elif callback_type == Keyboards.BUILDING_TOGGLE_CALLBACK:
+                await self._handle_building_toggle(update, context)
+            
             elif callback_type == "confirm_payment":
                 await self._handle_payment_confirmation(update, context, data_parts)
             
@@ -595,6 +601,14 @@ class CallbackHandler:
     async def _handle_notify_advanced(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка расширенных настроек уведомлений"""
         await self.message_generator.handle_advanced_notifications(update, context)
+    
+    async def _handle_building_tracker(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка меню отслеживания зданий"""
+        await self.message_generator.handle_building_tracker_menu(update, context)
+    
+    async def _handle_building_toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка переключения отслеживания зданий"""
+        await self.message_generator.handle_building_tracker_toggle(update, context)
     
     async def _handle_payment_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
                                          data_parts: list):

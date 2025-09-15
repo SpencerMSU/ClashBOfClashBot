@@ -43,6 +43,8 @@ class Keyboards:
     PREMIUM_MENU_CALLBACK = "premium_menu"
     NOTIFY_ADVANCED_CALLBACK = "notify_advanced"
     NOTIFY_CUSTOM_CALLBACK = "notify_custom"
+    BUILDING_TRACKER_CALLBACK = "building_tracker"
+    BUILDING_TOGGLE_CALLBACK = "building_toggle"
     
     @staticmethod
     def main_menu() -> ReplyKeyboardMarkup:
@@ -413,8 +415,28 @@ class Keyboards:
         keyboard = [
             [InlineKeyboardButton("🔔 Настройка уведомлений", 
                                 callback_data=Keyboards.NOTIFY_ADVANCED_CALLBACK)],
+            [InlineKeyboardButton("🏗️ Отслеживание улучшений", 
+                                callback_data=Keyboards.BUILDING_TRACKER_CALLBACK)],
             [InlineKeyboardButton("⬅️ Назад", callback_data="main_menu")]
         ]
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def building_tracker_menu(is_active: bool = False) -> InlineKeyboardMarkup:
+        """Меню управления отслеживанием улучшений зданий"""
+        keyboard = []
+        
+        if is_active:
+            keyboard.append([InlineKeyboardButton("🔴 Отключить отслеживание", 
+                                                callback_data=Keyboards.BUILDING_TOGGLE_CALLBACK)])
+            keyboard.append([InlineKeyboardButton("ℹ️ Статус: Активно", callback_data="noop")])
+        else:
+            keyboard.append([InlineKeyboardButton("🟢 Активировать отслеживание", 
+                                                callback_data=Keyboards.BUILDING_TOGGLE_CALLBACK)])
+            keyboard.append([InlineKeyboardButton("ℹ️ Статус: Неактивно", callback_data="noop")])
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Назад к премиум меню", 
+                                            callback_data=Keyboards.PREMIUM_MENU_CALLBACK)])
         return InlineKeyboardMarkup(keyboard)
     
     @staticmethod

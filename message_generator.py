@@ -1109,6 +1109,7 @@ class MessageGenerator:
                 f"⏰ Дней осталось: {subscription.days_remaining()}\n\n"
                 f"🔧 Доступные функции:\n"
                 f"• 🔔 Расширенные уведомления\n"
+                f"• 🏗️ Отслеживание улучшений зданий\n"
                 f"• ⚙️ Персональные настройки\n"
                 f"• 📊 Дополнительная статистика"
             )
@@ -1174,6 +1175,123 @@ class MessageGenerator:
                 await update.callback_query.edit_message_text(error_msg)
             else:
                 await update.message.reply_text(error_msg)
+    
+    async def handle_building_tracker_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка меню отслеживания улучшений зданий"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Проверяем статус подписки
+            subscription = await self.db_service.get_subscription(chat_id)
+            
+            if not subscription or not subscription.is_active or subscription.is_expired():
+                await update.callback_query.edit_message_text(
+                    "❌ Отслеживание улучшений доступно только для премиум подписчиков.",
+                    reply_markup=Keyboards.subscription_status(False)
+                )
+                return
+            
+            # Проверяем статус отслеживания
+            from building_monitor import BuildingMonitor
+            building_monitor = getattr(context.bot_data, 'building_monitor', None)
+            is_active = False
+            
+            if building_monitor:
+                is_active = await building_monitor.is_tracking_active(chat_id)
+            
+            message = (
+                f"🏗️ <b>Отслеживание улучшений зданий</b>\n\n"
+                f"📋 <b>Описание функции:</b>\n"
+                f"• Отслеживание всех зданий, героев и войск\n"
+                f"• Проверка каждые 5 минут\n"
+                f"• Уведомления об улучшениях\n"
+                f"• Только для премиум подписчиков\n\n"
+                f"📊 <b>Текущий статус:</b> {'🟢 Активно' if is_active else '🔴 Неактивно'}\n\n"
+                f"💡 <b>Пример уведомления:</b>\n"
+                f"\"🏗️ Мортира улучшена с 14 на 15 уровень!\""
+            )
+            
+            keyboard = Keyboards.building_tracker_menu(is_active)
+            
+            await update.callback_query.edit_message_text(
+                message, 
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при обработке меню отслеживания зданий: {e}")
+            await update.callback_query.edit_message_text("Произошла ошибка при загрузке меню отслеживания.")
+    
+    async def handle_building_tracker_toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Переключение состояния отслеживания зданий"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Проверяем статус подписки
+            subscription = await self.db_service.get_subscription(chat_id)
+            
+            if not subscription or not subscription.is_active or subscription.is_expired():
+                await update.callback_query.edit_message_text(
+                    "❌ Отслеживание улучшений доступно только для премиум подписчиков.",
+                    reply_markup=Keyboards.subscription_status(False)
+                )
+                return
+            
+            # Получаем привязанного игрока
+            user = await self.db_service.find_user(chat_id)
+            if not user:
+                await update.callback_query.edit_message_text(
+                    "❌ Для использования отслеживания нужно привязать аккаунт игрока.\n"
+                    "Используйте команду в главном меню для привязки аккаунта."
+                )
+                return
+            
+            from building_monitor import BuildingMonitor
+            building_monitor = getattr(context.bot_data, 'building_monitor', None)
+            
+            if not building_monitor:
+                await update.callback_query.edit_message_text(
+                    "❌ Сервис отслеживания временно недоступен."
+                )
+                return
+            
+            # Проверяем текущий статус
+            is_active = await building_monitor.is_tracking_active(chat_id)
+            
+            if is_active:
+                # Деактивируем отслеживание
+                success = await building_monitor.deactivate_tracking(chat_id)
+                if success:
+                    message = "🔴 Отслеживание улучшений отключено."
+                else:
+                    message = "❌ Ошибка при отключении отслеживания."
+            else:
+                # Активируем отслеживание
+                success = await building_monitor.activate_tracking(chat_id, user.player_tag)
+                if success:
+                    message = (
+                        "🟢 Отслеживание улучшений активировано!\n\n"
+                        "📋 Создан первый снимок ваших зданий.\n"
+                        "🔄 Проверка изменений будет происходить каждые 5 минут.\n"
+                        "🔔 Вы получите уведомление при любом улучшении."
+                    )
+                else:
+                    message = "❌ Ошибка при активации отслеживания."
+            
+            # Обновляем меню
+            new_status = not is_active if success else is_active
+            keyboard = Keyboards.building_tracker_menu(new_status)
+            
+            await update.callback_query.edit_message_text(
+                message, 
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при переключении отслеживания зданий: {e}")
+            await update.callback_query.edit_message_text("Произошла ошибка при изменении настроек отслеживания.")
     
     async def close(self):
         """Закрытие ресурсов"""
