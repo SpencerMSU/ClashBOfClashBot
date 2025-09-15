@@ -5,8 +5,10 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>org.example</groupId>
-    <artifactId>MainPr</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <artifactId>ClashBot</artifactId>
+    <version>2.0.0</version>
+    <name>ClashBot</name>
+    <description>Telegram bot for Clash of Clans players and clans</description>
 
     <properties>
         <maven.compiler.source>11</maven.compiler.source>

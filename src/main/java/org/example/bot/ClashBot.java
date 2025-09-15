@@ -16,8 +16,15 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Logger;
+import java.util.logging.Level;
 
+/**
+ * Main Telegram bot class for ClashBot.
+ * Handles incoming messages and callback queries for Clash of Clans integration.
+ */
 public class ClashBot extends TelegramLongPollingBot {
+    private static final Logger LOGGER = Logger.getLogger(ClashBot.class.getName());
 
     private final Map<Long, UserState> userStates = new ConcurrentHashMap<>();
     private final Map<Long, String> userInspectingClan = new ConcurrentHashMap<>();
@@ -33,6 +40,7 @@ public class ClashBot extends TelegramLongPollingBot {
         MessageGenerator messageGenerator = new MessageGenerator(this, dbService, cocApiClient);
         this.messageHandler = new MessageHandler(this, messageGenerator);
         this.callbackHandler = new CallbackHandler(this, messageGenerator);
+        LOGGER.info("ClashBot initialized with username: " + BotConfig.BOT_USERNAME);
     }
 
     @Override
@@ -57,7 +65,7 @@ public class ClashBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "Failed to edit message for chat " + chatId, e);
         }
     }
 
@@ -73,7 +81,7 @@ public class ClashBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            e.printStackTrace();
+            LOGGER.log(Level.WARNING, "Failed to send message to chat " + chatId, e);
         }
     }
 
