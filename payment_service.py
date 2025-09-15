@@ -19,16 +19,39 @@ class YooKassaService:
     TEST_SECRET_KEY = "test_*g63-87pIRJ5cQ4f7Pqtpl_L7ktfD69OfmhATrDtAQLtk"
     API_URL = "https://api.yookassa.ru/v3"
     
-    # Цены подписок в рублях
+    # Цены подписок в рублях (снижены)
     SUBSCRIPTION_PRICES = {
-        "1month": 50.00,
-        "3months": 120.00,
-        "6months": 400.00,
-        "1year": 700.00
+        # Premium
+        "premium_1month": 49.00,
+        "premium_3months": 119.00,
+        "premium_6months": 199.00,
+        "premium_1year": 349.00,
+        # PRO PLUS  
+        "proplus_1month": 99.00,
+        "proplus_3months": 249.00,
+        "proplus_6months": 449.00,
+        "proplus_1year": 799.00,
+        # Legacy support
+        "1month": 49.00,
+        "3months": 119.00,
+        "6months": 199.00,
+        "1year": 349.00
     }
     
     # Названия подписок
     SUBSCRIPTION_NAMES = {
+        # Premium
+        "premium_1month": "💎 Премиум на 1 месяц",
+        "premium_3months": "💎 Премиум на 3 месяца",
+        "premium_6months": "💎 Премиум на 6 месяцев", 
+        "premium_1year": "💎 Премиум на 1 год",
+        # PRO PLUS
+        "proplus_1month": "👑 ПРО ПЛЮС на 1 месяц",
+        "proplus_3months": "👑 ПРО ПЛЮС на 3 месяца",
+        "proplus_6months": "👑 ПРО ПЛЮС на 6 месяцев",
+        "proplus_1year": "👑 ПРО ПЛЮС на 1 год",
+        "proplus_permanent": "👑 ПРО ПЛЮС (Вечная)",
+        # Legacy support
         "1month": "Премиум подписка на 1 месяц",
         "3months": "Премиум подписка на 3 месяца",
         "6months": "Премиум подписка на 6 месяцев",

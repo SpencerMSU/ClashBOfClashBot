@@ -37,8 +37,12 @@ class Keyboards:
     MEMBERS_SORT_CALLBACK = "members_sort"
     MEMBERS_VIEW_CALLBACK = "members_view"
     SUBSCRIPTION_CALLBACK = "subscription"
+    SUBSCRIPTION_TYPE_CALLBACK = "sub_type"
     SUBSCRIPTION_PERIOD_CALLBACK = "sub_period"
     SUBSCRIPTION_PAY_CALLBACK = "sub_pay"
+    PREMIUM_MENU_CALLBACK = "premium_menu"
+    NOTIFY_ADVANCED_CALLBACK = "notify_advanced"
+    NOTIFY_CUSTOM_CALLBACK = "notify_custom"
     
     @staticmethod
     def main_menu() -> ReplyKeyboardMarkup:
@@ -321,18 +325,61 @@ class Keyboards:
         return InlineKeyboardMarkup(keyboard)
     
     @staticmethod
-    def subscription_periods() -> InlineKeyboardMarkup:
-        """Клавиатура выбора периода премиум подписки"""
+    def subscription_types() -> InlineKeyboardMarkup:
+        """Клавиатура выбора типа подписки"""
         keyboard = [
-            [InlineKeyboardButton("💎 1 месяц - 299₽", 
-                                callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:1month")],
-            [InlineKeyboardButton("💎 3 месяца - 799₽", 
-                                callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:3months")],
-            [InlineKeyboardButton("💎 6 месяцев - 1499₽", 
-                                callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:6months")],
-            [InlineKeyboardButton("💎 1 год - 2799₽", 
-                                callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:1year")]
+            [InlineKeyboardButton("💎 Премиум", 
+                                callback_data=f"{Keyboards.SUBSCRIPTION_TYPE_CALLBACK}:premium")],
+            [InlineKeyboardButton("👑 ПРО ПЛЮС", 
+                                callback_data=f"{Keyboards.SUBSCRIPTION_TYPE_CALLBACK}:proplus")],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="main_menu")]
         ]
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def subscription_periods(subscription_type: str) -> InlineKeyboardMarkup:
+        """Клавиатура выбора периода подписки"""
+        if subscription_type == "premium":
+            keyboard = [
+                [InlineKeyboardButton("💎 1 месяц", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:premium_1month"),
+                 InlineKeyboardButton("49₽", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PAY_CALLBACK}:premium_1month")],
+                [InlineKeyboardButton("💎 3 месяца", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:premium_3months"),
+                 InlineKeyboardButton("119₽", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PAY_CALLBACK}:premium_3months")],
+                [InlineKeyboardButton("💎 6 месяцев", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:premium_6months"),
+                 InlineKeyboardButton("199₽", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PAY_CALLBACK}:premium_6months")],
+                [InlineKeyboardButton("💎 1 год", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:premium_1year"),
+                 InlineKeyboardButton("349₽", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PAY_CALLBACK}:premium_1year")]
+            ]
+        else:  # proplus
+            keyboard = [
+                [InlineKeyboardButton("👑 1 месяц", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:proplus_1month"),
+                 InlineKeyboardButton("99₽", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PAY_CALLBACK}:proplus_1month")],
+                [InlineKeyboardButton("👑 3 месяца", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:proplus_3months"),
+                 InlineKeyboardButton("249₽", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PAY_CALLBACK}:proplus_3months")],
+                [InlineKeyboardButton("👑 6 месяцев", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:proplus_6months"),
+                 InlineKeyboardButton("449₽", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PAY_CALLBACK}:proplus_6months")],
+                [InlineKeyboardButton("👑 1 год", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:proplus_1year"),
+                 InlineKeyboardButton("799₽", 
+                                    callback_data=f"{Keyboards.SUBSCRIPTION_PAY_CALLBACK}:proplus_1year")]
+            ]
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Назад к типам", 
+                                            callback_data=f"{Keyboards.SUBSCRIPTION_CALLBACK}")])
         return InlineKeyboardMarkup(keyboard)
     
     @staticmethod
@@ -345,14 +392,57 @@ class Keyboards:
         return InlineKeyboardMarkup(keyboard)
     
     @staticmethod
-    def subscription_status() -> InlineKeyboardMarkup:
+    def subscription_status(has_subscription: bool = False) -> InlineKeyboardMarkup:
         """Клавиатура управления премиум подпиской"""
+        keyboard = []
+        if has_subscription:
+            keyboard.append([InlineKeyboardButton("💎 Продлить подписку", 
+                                                callback_data=Keyboards.SUBSCRIPTION_CALLBACK)])
+            keyboard.append([InlineKeyboardButton("👑 Меню премиум", 
+                                                callback_data=Keyboards.PREMIUM_MENU_CALLBACK)])
+        else:
+            keyboard.append([InlineKeyboardButton("💎 Оформить подписку", 
+                                                callback_data=Keyboards.SUBSCRIPTION_CALLBACK)])
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")])
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def premium_menu() -> InlineKeyboardMarkup:
+        """Меню для премиум подписчиков"""
         keyboard = [
-            [InlineKeyboardButton("💎 Продлить премиум", 
-                                callback_data=Keyboards.SUBSCRIPTION_CALLBACK)],
-            [InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton("🔔 Настройка уведомлений", 
+                                callback_data=Keyboards.NOTIFY_ADVANCED_CALLBACK)],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="main_menu")]
         ]
         return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def notification_menu(is_premium: bool = False) -> InlineKeyboardMarkup:
+        """Меню уведомлений"""
+        keyboard = [
+            [InlineKeyboardButton("🔔 Включить уведомления за 1 час до КВ", 
+                                callback_data=Keyboards.NOTIFY_TOGGLE_CALLBACK)]
+        ]
+        
+        if is_premium:
+            keyboard.append([InlineKeyboardButton("⚙️ Настройка доп. уведомлений", 
+                                                callback_data=Keyboards.NOTIFY_ADVANCED_CALLBACK)])
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="main_menu")])
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def notification_advanced_menu() -> ReplyKeyboardMarkup:
+        """Меню расширенных настроек уведомлений для премиум пользователей"""
+        keyboard = [
+            [KeyboardButton("🔔 Уведомление 1 (Нажмите для настройки)")],
+            [KeyboardButton("🔔 Уведомление 2 (Нажмите для настройки)")],
+            [KeyboardButton("🔔 Уведомление 3 (Нажмите для настройки)")],
+            [KeyboardButton("✅ Включить все уведомления")],
+            [KeyboardButton("⬅️ Назад в главное меню")]
+        ]
+        return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
 # Перечисления для сортировки
