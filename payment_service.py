@@ -15,16 +15,16 @@ class YooKassaService:
     """Сервис для работы с YooKassa API"""
     
     # Тестовые реквизиты YooKassa
-    TEST_SHOP_ID = "1000000"
-    TEST_SECRET_KEY = "test_secretkey"
+    TEST_SHOP_ID = "510603"
+    TEST_SECRET_KEY = "test_*g63-87pIRJ5cQ4f7Pqtpl_L7ktfD69OfmhATrDtAQLtk"
     API_URL = "https://api.yookassa.ru/v3"
     
     # Цены подписок в рублях
     SUBSCRIPTION_PRICES = {
-        "1month": 299.00,
-        "3months": 799.00,
-        "6months": 1499.00,
-        "1year": 2799.00
+        "1month": 50.00,
+        "3months": 120.00,
+        "6months": 400.00,
+        "1year": 700.00
     }
     
     # Названия подписок

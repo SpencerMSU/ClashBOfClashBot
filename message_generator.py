@@ -140,12 +140,25 @@ class MessageGenerator:
     async def display_player_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
                                  player_tag: str, keyboard: InlineKeyboardMarkup = None):
         """Отображение информации об игроке"""
+
+        # Сначала убираем клавиатуру и показываем сообщение о поиске
+        search_message = await update.message.reply_text(
+            "🔍 Поиск игрока...",
+            reply_markup=None  # Убираем все кнопки во время поиска
+        )
+
         async with self.coc_client as client:
             player_data = await client.get_player_info(player_tag)
             
             if not player_data:
+                # Редактируем сообщение о поиске на ошибку
+                await search_message.edit_text(
+                    "❌ Игрок с таким тегом не найден.\n"
+                    "Проверьте правильность введенного тега."
+                )
+                # Отправляем новое сообщение с главным меню
                 await update.message.reply_text(
-                    "❌ Игрок с таким тегом не найден.",
+                    "Выберите действие:",
                     reply_markup=Keyboards.main_menu()
                 )
                 return
@@ -153,13 +166,17 @@ class MessageGenerator:
             # Форматируем информацию об игроке
             message = self._format_player_info(player_data)
             
-            if update.callback_query:
-                await update.callback_query.edit_message_text(
-                    message, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
+            # Редактируем сообщение поиска на информацию об игроке
+            if keyboard:
+                await search_message.edit_text(
+                    message,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=keyboard
                 )
             else:
-                await update.message.reply_text(
-                    message, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
+                await search_message.edit_text(
+                    message,
+                    parse_mode=ParseMode.MARKDOWN
                 )
     
     async def display_clan_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE, clan_tag: str):
@@ -177,7 +194,7 @@ class MessageGenerator:
             # Сохраняем тег клана для дальнейшего использования
             context.user_data['inspecting_clan'] = clan_tag
             
-            # Форматируем информацию о клане
+            # Форматируем информацию о ��лане
             message = self._format_clan_info(clan_data)
             keyboard = Keyboards.clan_inspection_menu()
             
@@ -752,7 +769,7 @@ class MessageGenerator:
             )
     
     def _format_current_war_info(self, war_data: Dict[Any, Any]) -> str:
-        """Форматирование информации о текущей войне"""
+        """Формат��рование информации о текущей войне"""
         state = war_data.get('state', 'unknown')
         team_size = war_data.get('teamSize', 0)
         
@@ -785,7 +802,7 @@ class MessageGenerator:
         
         message += f"🛡️ *{clan_name}*\n"
         message += f"⭐ Звезды: {clan_stars}\n"
-        message += f"💥 Разрушение: {clan_destruction:.1f}%\n"
+        message += f"💥 Разр��шение: {clan_destruction:.1f}%\n"
         message += f"⚔️ Атак использовано: {clan_attacks}\n\n"
         
         message += f"🛡️ *{opponent_name}*\n"

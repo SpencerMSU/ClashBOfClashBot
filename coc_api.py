@@ -44,32 +44,34 @@ class CocApiClient:
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Асинхронный контекстный менеджер - выход"""
-        if self.session:
-            await self.session.close()
-    
+        # НЕ закрываем сессию здесь, так как она может использоваться повторно
+        pass
+
     async def _make_request(self, endpoint: str) -> Optional[Dict[Any, Any]]:
         """Базовый метод для выполнения HTTP запросов"""
-        if not self.session:
-            # Создаем коннектор с пулом соединений для оптимизации
+        # Используем сессию из контекстного менеджера или создаем новую
+        session_to_use = self.session
+        if not session_to_use:
+            # Создаем временную сессию для одного запроса
             connector = aiohttp.TCPConnector(
-                limit=100,  # Максимум 100 соединений в пуле
-                limit_per_host=30,  # Максимум 30 соединений на хост
+                limit=100,
+                limit_per_host=30,
                 enable_cleanup_closed=True,
-                keepalive_timeout=300  # Держим соединения живыми 5 минут
+                keepalive_timeout=300
             )
             
-            self.session = aiohttp.ClientSession(
+            session_to_use = aiohttp.ClientSession(
                 headers={
                     'Authorization': f'Bearer {self.api_token}',
                     'Content-Type': 'application/json'
                 },
-                timeout=aiohttp.ClientTimeout(total=10),  # Уменьшили таймаут до 10 секунд
+                timeout=aiohttp.ClientTimeout(total=15),
                 connector=connector
             )
         
         url = f"{self.base_url}{endpoint}"
         try:
-            async with self.session.get(url) as response:
+            async with session_to_use.get(url) as response:
                 if response.status == 403:
                     logger.error("ОШИБКА 403: API ключ недействителен или ваш IP изменился. "
                                "Проверьте настройки на developer.clashofclans.com")
@@ -83,19 +85,17 @@ class CocApiClient:
                 
                 return await response.json()
         
-        except aiohttp.ClientTimeout:
+        except asyncio.TimeoutError:
             logger.error(f"Таймаут при запросе к {url}")
             return None
-        except aiohttp.ClientError as e:
-            logger.error(f"Ошибка клиента при запросе к {url}: {e}")
-            return None
-        except json.JSONDecodeError as e:
-            logger.error(f"Ошибка декодирования JSON от {url}: {e}")
-            return None
         except Exception as e:
-            logger.error(f"Неожиданная ошибка при запросе к {url}: {e}")
+            logger.error(f"Ошибка при запросе к {url}: {e}")
             return None
-    
+        finally:
+            # Закрываем сессию только если она была создана временно
+            if not self.session and session_to_use:
+                await session_to_use.close()
+
     async def get_player_info(self, player_tag: str) -> Optional[Dict[Any, Any]]:
         """Получение информации об игроке"""
         formatted_tag = quote(player_tag, safe='')
