@@ -1,9 +1,10 @@
 """
 Генератор сообщений - аналог Java MessageGenerator
 """
+import asyncio
 import logging
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from telegram import Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
@@ -12,6 +13,7 @@ from database import DatabaseService
 from coc_api import CocApiClient, format_clan_tag, format_player_tag
 from keyboards import Keyboards, WarSort, MemberSort, MemberView
 from models.user import User
+from models.subscription import Subscription
 from payment_service import YooKassaService
 from config import config
 
@@ -621,7 +623,6 @@ class MessageGenerator:
         """Планирование проверки статуса платежа"""
         # В реальном боте здесь был бы более сложный механизм проверки
         # Для простоты используем базовую логику
-        import asyncio
         
         async def check_payment():
             for _ in range(30):  # Проверяем 5 минут с интервалом 10 секунд
@@ -639,9 +640,6 @@ class MessageGenerator:
                                         payment_id: str, payment_data: Dict):
         """Обработка успешного платежа"""
         try:
-            from datetime import datetime, timedelta
-            from models.subscription import Subscription
-            
             # Получаем длительность подписки
             duration = self.payment_service.get_subscription_duration(subscription_type)
             amount = float(payment_data['amount']['value'])
