@@ -1,7 +1,7 @@
 """
 Клавиатуры и кнопки для бота - аналог Java Keyboards
 """
-from typing import List, Optional
+from typing import List, Optional, Dict
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from datetime import datetime, date
 
@@ -133,10 +133,116 @@ class Keyboards:
         return InlineKeyboardMarkup(keyboard)
     
     @staticmethod
+    def members_with_profiles(clan_tag: str, current_page: int, total_pages: int, 
+                             sort_type: str = "role", view_type: str = "compact", 
+                             members: List[Dict] = None) -> InlineKeyboardMarkup:
+        """Пагинация для списка участников с кликабельными профилями"""
+        keyboard = []
+        
+        # Добавляем кнопки для отдельных игроков (по 2 в ряд)
+        if members:
+            for i in range(0, len(members), 2):
+                row = []
+                for j in range(2):
+                    if i + j < len(members):
+                        member = members[i + j]
+                        name = member.get('name', 'Неизвестно')
+                        tag = member.get('tag', '')
+                        # Ограничиваем длину имени для кнопки
+                        display_name = name[:15] + "..." if len(name) > 15 else name
+                        row.append(InlineKeyboardButton(f"👤 {display_name}", 
+                                                       callback_data=f"{Keyboards.PROFILE_CALLBACK}:{tag}"))
+                keyboard.append(row)
+        
+        # Сортировка и вид
+        sort_buttons = [
+            InlineKeyboardButton("🎖 По роли", 
+                               callback_data=f"{Keyboards.MEMBERS_SORT_CALLBACK}:{clan_tag}:role:{view_type}:{current_page}"),
+            InlineKeyboardButton("🏆 По трофеям", 
+                               callback_data=f"{Keyboards.MEMBERS_SORT_CALLBACK}:{clan_tag}:trophies:{view_type}:{current_page}")
+        ]
+        keyboard.append(sort_buttons)
+        
+        view_buttons = [
+            InlineKeyboardButton("📋 Компактно", 
+                               callback_data=f"{Keyboards.MEMBERS_VIEW_CALLBACK}:{clan_tag}:{sort_type}:compact:{current_page}"),
+            InlineKeyboardButton("📄 Подробно", 
+                               callback_data=f"{Keyboards.MEMBERS_VIEW_CALLBACK}:{clan_tag}:{sort_type}:detailed:{current_page}")
+        ]
+        keyboard.append(view_buttons)
+        
+        # Навигация
+        nav_buttons = []
+        if current_page > 1:
+            nav_buttons.append(InlineKeyboardButton("⬅️", 
+                                                   callback_data=f"{Keyboards.MEMBERS_SORT_CALLBACK}:{clan_tag}:{sort_type}:{view_type}:{current_page-1}"))
+        
+        nav_buttons.append(InlineKeyboardButton(f"{current_page}/{total_pages}", callback_data="noop"))
+        
+        if current_page < total_pages:
+            nav_buttons.append(InlineKeyboardButton("➡️", 
+                                                   callback_data=f"{Keyboards.MEMBERS_SORT_CALLBACK}:{clan_tag}:{sort_type}:{view_type}:{current_page+1}"))
+        
+        keyboard.append(nav_buttons)
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
     def war_list_pagination(clan_tag: str, current_page: int, total_pages: int,
                            sort_order: str = "recent") -> InlineKeyboardMarkup:
         """Пагинация для списка войн"""
         keyboard = []
+        
+        # Сортировка
+        sort_buttons = [
+            InlineKeyboardButton("📅 Недавние", 
+                               callback_data=f"{Keyboards.WAR_LIST_CALLBACK}:{clan_tag}:recent:{current_page}"),
+            InlineKeyboardButton("🏆 Победы", 
+                               callback_data=f"{Keyboards.WAR_LIST_CALLBACK}:{clan_tag}:wins:{current_page}"),
+            InlineKeyboardButton("❌ Поражения", 
+                               callback_data=f"{Keyboards.WAR_LIST_CALLBACK}:{clan_tag}:losses:{current_page}")
+        ]
+        keyboard.append(sort_buttons)
+        
+        # Навигация
+        nav_buttons = []
+        if current_page > 1:
+            nav_buttons.append(InlineKeyboardButton("⬅️", 
+                                                   callback_data=f"{Keyboards.WAR_LIST_CALLBACK}:{clan_tag}:{sort_order}:{current_page-1}"))
+        
+        nav_buttons.append(InlineKeyboardButton(f"{current_page}/{total_pages}", callback_data="noop"))
+        
+        if current_page < total_pages:
+            nav_buttons.append(InlineKeyboardButton("➡️", 
+                                                   callback_data=f"{Keyboards.WAR_LIST_CALLBACK}:{clan_tag}:{sort_order}:{current_page+1}"))
+        
+        keyboard.append(nav_buttons)
+        
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def war_list_with_details(clan_tag: str, current_page: int, total_pages: int,
+                             sort_order: str = "recent", wars: List[Dict] = None) -> InlineKeyboardMarkup:
+        """Пагинация для списка войн с кликабельными деталями"""
+        keyboard = []
+        
+        # Добавляем кнопки для отдельных войн
+        if wars:
+            for war in wars:
+                opponent_name = war.get('opponent_name', 'Неизвестно')
+                result = war.get('result', 'tie')
+                result_emoji = {"win": "🏆", "lose": "❌", "tie": "🤝"}.get(result, "❓")
+                is_cwl = war.get('is_cwl_war', False)
+                war_type = "ЛВК" if is_cwl else "КВ"
+                
+                # Ограничиваем длину имени противника для кнопки
+                display_name = opponent_name[:20] + "..." if len(opponent_name) > 20 else opponent_name
+                war_end_time = war.get('end_time', '')
+                
+                keyboard.append([
+                    InlineKeyboardButton(f"{result_emoji} {war_type} vs {display_name}", 
+                                       callback_data=f"{Keyboards.WAR_INFO_CALLBACK}:{clan_tag}:{war_end_time}")
+                ])
         
         # Сортировка
         sort_buttons = [

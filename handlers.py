@@ -161,7 +161,10 @@ class CallbackHandler:
         message_id = query.message.message_id
         
         try:
-            if callback_type == Keyboards.MEMBERS_SORT_CALLBACK:
+            if callback_type == Keyboards.MEMBERS_CALLBACK:
+                await self._handle_members_callback(update, context)
+            
+            elif callback_type == Keyboards.MEMBERS_SORT_CALLBACK:
                 await self._handle_members_sort(update, context, data_parts)
             
             elif callback_type == Keyboards.MEMBERS_VIEW_CALLBACK:
@@ -236,6 +239,18 @@ class CallbackHandler:
     async def _handle_war_list(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
                               data_parts: list):
         """Обработка списка войн"""
+        # Handle initial war list button click (just "warlist")
+        if len(data_parts) == 1:
+            clan_tag = context.user_data.get('inspecting_clan')
+            if clan_tag:
+                await self.message_generator.display_war_list_page(
+                    update, context, clan_tag, sort_order="recent", page=1
+                )
+            else:
+                await update.callback_query.edit_message_text("Ошибка: клан не выбран.")
+            return
+        
+        # Handle pagination and sorting (warlist:clan_tag:sort_order:page)
         if len(data_parts) < 4:
             return
         
@@ -279,6 +294,18 @@ class CallbackHandler:
         
         year_month = data_parts[1]
         await self.message_generator.display_cwl_bonus_info(update, context, year_month)
+    
+    async def _handle_members_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка просмотра участников клана"""
+        # Получаем тег клана из контекста
+        clan_tag = context.user_data.get('inspecting_clan')
+        if clan_tag:
+            # Отображаем первую страницу участников с сортировкой по роли по умолчанию
+            await self.message_generator.display_members_page(
+                update, context, clan_tag, page=1, sort_type="role", view_type="compact"
+            )
+        else:
+            await update.callback_query.edit_message_text("Ошибка: клан не выбран.")
     
     async def _handle_current_war(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка текущей войны"""

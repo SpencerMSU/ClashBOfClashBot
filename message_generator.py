@@ -207,7 +207,7 @@ class MessageGenerator:
             
             # Форматируем сообщение
             message = self._format_members_page(page_members, page, total_pages, total_members, view_type)
-            keyboard = Keyboards.members_pagination(clan_tag, page, total_pages, sort_type, view_type)
+            keyboard = Keyboards.members_with_profiles(clan_tag, page, total_pages, sort_type, view_type, page_members)
             
             await update.callback_query.edit_message_text(
                 message, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
@@ -232,9 +232,14 @@ class MessageGenerator:
         total_wars = len(filtered_wars)
         total_pages = (total_wars + self.WARS_PER_PAGE - 1) // self.WARS_PER_PAGE
         
+        # Пагинация для текущей страницы
+        start_idx = (page - 1) * self.WARS_PER_PAGE
+        end_idx = start_idx + self.WARS_PER_PAGE
+        page_wars = filtered_wars[start_idx:end_idx]
+        
         # Форматируем сообщение
-        message = self._format_war_list(filtered_wars, page, total_pages)
-        keyboard = Keyboards.war_list_pagination(clan_tag, page, total_pages, sort_order)
+        message = self._format_war_list(page_wars, page, total_pages)
+        keyboard = Keyboards.war_list_with_details(clan_tag, page, total_pages, sort_order, page_wars)
         
         await update.callback_query.edit_message_text(
             message, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
