@@ -29,11 +29,11 @@ async def main():
         
         # Проверяем переменные окружения
         if not config.BOT_TOKEN:
-            logger.error("BOT_TOKEN не установлен. Установите переменную окружения BOT_TOKEN.")
+            logger.error("BOT_TOKEN не установлен. Добавьте токен в файл api_tokens.txt или переменную окружения BOT_TOKEN.")
             return
         
         if not config.COC_API_TOKEN:
-            logger.error("COC_API_TOKEN не установлен. Установите переменную окружения COC_API_TOKEN.")
+            logger.error("COC_API_TOKEN не установлен. Добавьте токен в файл api_tokens.txt или переменную окружения COC_API_TOKEN.")
             return
         
         # Создание и запуск бота
