@@ -98,6 +98,22 @@ class CocApiClient:
 
     async def get_player_info(self, player_tag: str) -> Optional[Dict[Any, Any]]:
         """Получение информации об игроке"""
+        # Валидация тега игрока
+        is_valid, validation_message = validate_player_tag(player_tag)
+        if not is_valid:
+            logger.error(f"Невалидный тег игрока '{player_tag}': {validation_message}")
+            return None
+        
+        # Предупреждение, если тег похож на клановый
+        if validation_message:
+            logger.warning(f"Тег игрока '{player_tag}': {validation_message}")
+        
+        # Дополнительная проверка: если тег точно клановый, выдаем ошибку
+        if is_clan_tag(player_tag):
+            logger.error(f"Попытка использовать тег клана '{player_tag}' как тег игрока. "
+                        f"Используйте get_clan_info() для получения информации о клане.")
+            return None
+        
         formatted_tag = quote(player_tag, safe='')
         endpoint = f"/players/{formatted_tag}"
         
@@ -111,6 +127,12 @@ class CocApiClient:
     
     async def get_clan_info(self, clan_tag: str) -> Optional[Dict[Any, Any]]:
         """Получение информации о клане"""
+        # Валидация тега клана
+        is_valid, validation_message = validate_clan_tag(clan_tag)
+        if not is_valid:
+            logger.error(f"Невалидный тег клана '{clan_tag}': {validation_message}")
+            return None
+        
         formatted_tag = quote(clan_tag, safe='')
         endpoint = f"/clans/{formatted_tag}"
         
@@ -124,6 +146,12 @@ class CocApiClient:
     
     async def get_clan_members(self, clan_tag: str) -> Optional[List[Dict[Any, Any]]]:
         """Получение списка участников клана"""
+        # Валидация тега клана
+        is_valid, validation_message = validate_clan_tag(clan_tag)
+        if not is_valid:
+            logger.error(f"Невалидный тег клана '{clan_tag}': {validation_message}")
+            return None
+        
         formatted_tag = quote(clan_tag, safe='')
         endpoint = f"/clans/{formatted_tag}/members"
         
@@ -137,6 +165,12 @@ class CocApiClient:
     
     async def get_clan_current_war(self, clan_tag: str) -> Optional[Dict[Any, Any]]:
         """Получение информации о текущей войне клана"""
+        # Валидация тега клана
+        is_valid, validation_message = validate_clan_tag(clan_tag)
+        if not is_valid:
+            logger.error(f"Невалидный тег клана '{clan_tag}': {validation_message}")
+            return None
+        
         formatted_tag = quote(clan_tag, safe='')
         endpoint = f"/clans/{formatted_tag}/currentwar"
         
@@ -150,6 +184,12 @@ class CocApiClient:
     
     async def get_clan_war_log(self, clan_tag: str) -> Optional[Dict[Any, Any]]:
         """Получение журнала войн клана"""
+        # Валидация тега клана
+        is_valid, validation_message = validate_clan_tag(clan_tag)
+        if not is_valid:
+            logger.error(f"Невалидный тег клана '{clan_tag}': {validation_message}")
+            return None
+        
         formatted_tag = quote(clan_tag, safe='')
         endpoint = f"/clans/{formatted_tag}/warlog"
         
@@ -163,6 +203,12 @@ class CocApiClient:
     
     async def get_clan_war_league_group(self, clan_tag: str) -> Optional[Dict[Any, Any]]:
         """Получение информации о группе Лиги войн кланов"""
+        # Валидация тега клана
+        is_valid, validation_message = validate_clan_tag(clan_tag)
+        if not is_valid:
+            logger.error(f"Невалидный тег клана '{clan_tag}': {validation_message}")
+            return None
+        
         formatted_tag = quote(clan_tag, safe='')
         endpoint = f"/clans/{formatted_tag}/currentwar/leaguegroup"
         
@@ -209,6 +255,79 @@ def format_player_tag(tag: str) -> str:
     if not tag.startswith('#'):
         tag = '#' + tag
     return tag
+
+
+def is_clan_tag(tag: str) -> bool:
+    """Проверка, является ли тег тегом клана"""
+    # Убираем #, пробелы и приводим к верхнему регистру
+    clean_tag = tag.replace('#', '').replace(' ', '').upper()
+    
+    # Теги кланов обычно 9 символов
+    # Теги игроков обычно 8-10 символов, но чаще всего 8-9
+    # Более точная проверка: если 9 символов - скорее всего клан
+    return len(clean_tag) == 9
+
+
+def is_player_tag(tag: str) -> bool:
+    """Проверка, является ли тег тегом игрока"""
+    # Убираем #, пробелы и приводим к верхнему регистру
+    clean_tag = tag.replace('#', '').replace(' ', '').upper()
+    
+    # Теги игроков обычно 8-10 символов
+    # Но если это 9 символов, лучше дополнительно проверить
+    return 8 <= len(clean_tag) <= 10
+
+
+def validate_player_tag(tag: str) -> tuple[bool, str]:
+    """
+    Проверка валидности тега игрока
+    Возвращает: (валидность, сообщение об ошибке)
+    """
+    if not tag:
+        return False, "Тег не может быть пустым"
+    
+    clean_tag = tag.replace('#', '').replace(' ', '').upper()
+    
+    # Проверяем длину
+    if len(clean_tag) < 8:
+        return False, "Тег слишком короткий (должен быть минимум 8 символов)"
+    elif len(clean_tag) > 10:
+        return False, "Тег слишком длинный (должен быть максимум 10 символов)"
+    
+    # Проверяем на недопустимые символы
+    valid_chars = set('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+    if not all(c in valid_chars for c in clean_tag):
+        return False, "Тег содержит недопустимые символы"
+    
+    # Предупреждение, если похоже на тег клана
+    if len(clean_tag) == 9:
+        return True, "Внимание: тег из 9 символов может быть тегом клана"
+    
+    return True, ""
+
+
+def validate_clan_tag(tag: str) -> tuple[bool, str]:
+    """
+    Проверка валидности тега клана
+    Возвращает: (валидность, сообщение об ошибке)
+    """
+    if not tag:
+        return False, "Тег не может быть пустым"
+    
+    clean_tag = tag.replace('#', '').replace(' ', '').upper()
+    
+    # Проверяем длину
+    if len(clean_tag) < 8:
+        return False, "Тег слишком короткий (должен быть минимум 8 символов)"
+    elif len(clean_tag) > 10:
+        return False, "Тег слишком длинный (должен быть максимум 10 символов)"
+    
+    # Проверяем на недопустимые символы
+    valid_chars = set('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+    if not all(c in valid_chars for c in clean_tag):
+        return False, "Тег содержит недопустимые символы"
+    
+    return True, ""
 
 
 def determine_war_result(clan_stars: int, opponent_stars: int) -> str:
