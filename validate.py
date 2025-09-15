@@ -7,13 +7,29 @@ import sys
 import tempfile
 import logging
 
-# Временно устанавливаем тестовые переменные окружения
-os.environ['BOT_TOKEN'] = 'test_token'
-os.environ['COC_API_TOKEN'] = 'test_coc_token'
+# Создаем временный файл с тестовыми токенами для валидации
+TEST_TOKENS_CONTENT = """# Test tokens for validation
+BOT_TOKEN=test_token
+COC_API_TOKEN=test_coc_token
+BOT_USERNAME=test_bot
+"""
+
+def create_test_tokens_file():
+    """Создание временного файла с тестовыми токенами"""
+    with open('api_tokens.txt', 'w', encoding='utf-8') as f:
+        f.write(TEST_TOKENS_CONTENT)
+
+def cleanup_test_tokens_file():
+    """Удаление временного файла с тестовыми токенами"""
+    if os.path.exists('api_tokens.txt'):
+        os.remove('api_tokens.txt')
 
 async def validate_components():
     """Валидация всех компонентов бота"""
     print("🔍 Начинаем валидацию компонентов...")
+    
+    # Создаем временный файл с тестовыми токенами
+    create_test_tokens_file()
     
     try:
         # 1. Проверка импорта конфигурации
@@ -135,6 +151,9 @@ async def validate_components():
         import traceback
         traceback.print_exc()
         return False
+    finally:
+        # Удаляем тестовый файл токенов
+        cleanup_test_tokens_file()
 
 
 async def main():
@@ -143,9 +162,10 @@ async def main():
     
     if success:
         print("\n📝 Для запуска бота:")
-        print("1. Создайте файл .env на основе .env.example")
-        print("2. Заполните BOT_TOKEN и COC_API_TOKEN")
-        print("3. Запустите: python main.py")
+        print("1. Создайте файл api_tokens.txt на основе примера")
+        print("2. Заполните BOT_TOKEN и COC_API_TOKEN в файле")
+        print("3. Альтернативно: используйте .env файл с переменными окружения")
+        print("4. Запустите: python main.py")
         sys.exit(0)
     else:
         print("\n❌ Валидация не пройдена. Проверьте ошибки выше.")

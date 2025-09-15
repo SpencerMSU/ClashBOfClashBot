@@ -5,14 +5,46 @@ import os
 from typing import Optional
 
 
+def _read_api_tokens(filename: str = 'api_tokens.txt') -> dict:
+    """Чтение API токенов из текстового файла"""
+    tokens = {}
+    
+    try:
+        # Сначала ищем файл в текущей директории
+        if os.path.exists(filename):
+            filepath = filename
+        else:
+            # Если не найден, ищем в директории скрипта
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            filepath = os.path.join(script_dir, filename)
+        
+        if os.path.exists(filepath):
+            with open(filepath, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    # Пропускаем комментарии и пустые строки
+                    if line and not line.startswith('#'):
+                        if '=' in line:
+                            key, value = line.split('=', 1)
+                            tokens[key.strip()] = value.strip()
+        
+    except Exception as e:
+        print(f"Ошибка при чтении файла токенов {filename}: {e}")
+    
+    return tokens
+
+
 class BotConfig:
     """Конфигурация бота"""
     
     def __init__(self):
-        # Основные токены и настройки
-        self.BOT_TOKEN: str = os.getenv('BOT_TOKEN', '')
-        self.BOT_USERNAME: str = os.getenv('BOT_USERNAME', '')
-        self.COC_API_TOKEN: str = os.getenv('COC_API_TOKEN', '')
+        # Читаем токены из файла
+        api_tokens = _read_api_tokens()
+        
+        # Основные токены и настройки (сначала пробуем файл, потом переменные окружения)
+        self.BOT_TOKEN: str = api_tokens.get('BOT_TOKEN', '') or os.getenv('BOT_TOKEN', '')
+        self.BOT_USERNAME: str = api_tokens.get('BOT_USERNAME', '') or os.getenv('BOT_USERNAME', '')
+        self.COC_API_TOKEN: str = api_tokens.get('COC_API_TOKEN', '') or os.getenv('COC_API_TOKEN', '')
         
         # Настройки базы данных
         self.DATABASE_PATH: str = os.getenv('DATABASE_PATH', 'clashbot.db')
@@ -33,9 +65,9 @@ class BotConfig:
     def _validate_config(self):
         """Проверка обязательных параметров конфигурации"""
         if not self.BOT_TOKEN:
-            raise ValueError("BOT_TOKEN не установлен в переменных окружения")
+            raise ValueError("BOT_TOKEN не установлен. Добавьте токен в файл api_tokens.txt или переменные окружения")
         if not self.COC_API_TOKEN:
-            raise ValueError("COC_API_TOKEN не установлен в переменных окружения")
+            raise ValueError("COC_API_TOKEN не установлен. Добавьте токен в файл api_tokens.txt или переменные окружения")
 
 
 # Глобальный экземпляр конфигурации

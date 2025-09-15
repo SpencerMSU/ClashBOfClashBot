@@ -35,6 +35,9 @@ ENV/
 # Environment variables
 .env
 
+# API Tokens file (contains sensitive information)
+api_tokens.txt
+
 # Database
 *.db
 clashbot.db
