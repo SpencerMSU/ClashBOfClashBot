@@ -48,6 +48,13 @@ class ClashBot:
             self.application = Application.builder().token(self.token).build()
             self.bot_instance = self.application.bot
             
+            # Проверяем валидность токена перед запуском
+            try:
+                await self.bot_instance.get_me()
+            except Exception as e:
+                logger.error(f"Неверный токен бота или проблемы с сетью: {e}")
+                raise ValueError(f"Не удается подключиться к Telegram API: {e}")
+            
             # Регистрация обработчиков
             self._register_handlers()
             
@@ -117,15 +124,20 @@ class ClashBot:
             
         except KeyboardInterrupt:
             logger.info("Получен сигнал завершения")
+            await self.shutdown()
+        except ValueError as e:
+            # Validation errors (like invalid token) - don't try to clean up application
+            logger.error(f"Ошибка конфигурации: {e}")
+            await self._shutdown_external_components()
         except Exception as e:
             logger.error(f"Ошибка при работе бота: {e}")
-        finally:
+            # For other errors, try graceful shutdown
             await self.shutdown()
     
-    async def shutdown(self):
-        """Завершение работы бота"""
+    async def _shutdown_external_components(self):
+        """Завершение работы внешних компонентов (не управляемых application)"""
         try:
-            logger.info("Завершение работы бота...")
+            logger.info("Завершение работы внешних компонентов...")
             
             # Остановка архиватора
             if self.war_archiver:
@@ -138,6 +150,19 @@ class ClashBot:
             # Закрытие сервиса платежей
             if hasattr(self.message_generator, 'close'):
                 await self.message_generator.close()
+            
+            logger.info("Внешние компоненты успешно завершили работу")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при завершении работы внешних компонентов: {e}")
+
+    async def shutdown(self):
+        """Завершение работы бота"""
+        try:
+            logger.info("Завершение работы бота...")
+            
+            # Сначала завершаем внешние компоненты
+            await self._shutdown_external_components()
             
             # Остановка приложения
             if self.application:
