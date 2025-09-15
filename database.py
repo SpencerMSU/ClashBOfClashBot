@@ -284,7 +284,6 @@ class DatabaseService:
                 
                 if row and row[0]:
                     try:
-                        import json
                         bonus_data = json.loads(row[0])
                         return bonus_data if isinstance(bonus_data, list) else []
                     except json.JSONDecodeError:
