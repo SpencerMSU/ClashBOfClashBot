@@ -110,6 +110,32 @@ class DatabaseService:
             
             await db.commit()
             logger.info("База данных успешно инициализирована")
+            
+            # Add permanent PRO PLUS subscription for specified user
+            await self._grant_permanent_proplus_subscription(5545099444)
+    
+    async def _grant_permanent_proplus_subscription(self, telegram_id: int):
+        """Предоставление вечной PRO PLUS подписки для указанного пользователя"""
+        try:
+            # Create a subscription that expires in 100 years (essentially permanent)
+            start_date = datetime.now()
+            end_date = start_date + timedelta(days=36500)  # ~100 years
+            
+            permanent_subscription = Subscription(
+                telegram_id=telegram_id,
+                subscription_type="proplus_permanent",
+                start_date=start_date,
+                end_date=end_date,
+                is_active=True,
+                payment_id="PERMANENT_GRANT",
+                amount=0.0
+            )
+            
+            await self.save_subscription(permanent_subscription)
+            logger.info(f"Предоставлена вечная PRO PLUS подписка для пользователя {telegram_id}")
+        
+        except Exception as e:
+            logger.error(f"Ошибка при предоставлении вечной подписки: {e}")
     
     async def find_user(self, telegram_id: int) -> Optional[User]:
         """Поиск пользователя по Telegram ID"""
@@ -446,3 +472,48 @@ class DatabaseService:
                     )
                     for row in rows
                 ]
+    
+    async def is_notifications_enabled(self, telegram_id: int) -> bool:
+        """Проверка включены ли уведомления для пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT telegram_id FROM notifications WHERE telegram_id = ?",
+                (telegram_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row is not None
+    
+    async def enable_notifications(self, telegram_id: int) -> bool:
+        """Включение уведомлений для пользователя"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    "INSERT OR IGNORE INTO notifications (telegram_id) VALUES (?)",
+                    (telegram_id,)
+                )
+                await db.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при включении уведомлений: {e}")
+            return False
+    
+    async def disable_notifications(self, telegram_id: int) -> bool:
+        """Отключение уведомлений для пользователя"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    "DELETE FROM notifications WHERE telegram_id = ?",
+                    (telegram_id,)
+                )
+                await db.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при отключении уведомлений: {e}")
+            return False
+    
+    async def get_notification_users(self) -> List[int]:
+        """Получение списка пользователей с включенными уведомлениями"""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT telegram_id FROM notifications") as cursor:
+                rows = await cursor.fetchall()
+                return [row[0] for row in rows]

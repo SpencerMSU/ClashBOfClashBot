@@ -426,7 +426,8 @@ class MessageGenerator:
         message += f"Всего участников: {total_members}\n\n"
         
         for i, member in enumerate(members, 1):
-            name = member.get('name', 'Неизвестно')
+            # Escape special characters in names to prevent parsing errors
+            name = member.get('name', 'Неизвестно').replace('*', '\\*').replace('_', '\\_').replace('[', '\\[').replace(']', '\\]').replace('`', '\\`')
             tag = member.get('tag', 'Неизвестно')
             role = member.get('role', 'member')
             role_text = self.ROLE_TRANSLATIONS.get(role, '👤 Участник')
@@ -436,14 +437,14 @@ class MessageGenerator:
                 donations = member.get('donations', 0)
                 received = member.get('donationsReceived', 0)
                 
-                message += f"**{i + (page-1) * self.MEMBERS_PER_PAGE}.** {name}\n"
+                message += f"*{i + (page-1) * self.MEMBERS_PER_PAGE}.* {name}\n"
                 message += f"   🏷 `{tag}`\n"
                 message += f"   👑 {role_text}\n"
                 message += f"   🏆 {trophies:,} трофеев\n"
                 message += f"   📤 Отдано: {donations:,}\n"
                 message += f"   📥 Получено: {received:,}\n\n"
             else:
-                message += f"**{i + (page-1) * self.MEMBERS_PER_PAGE}.** {role_text} {name} - 🏆 {trophies:,}\n"
+                message += f"*{i + (page-1) * self.MEMBERS_PER_PAGE}.* {role_text} {name} - 🏆 {trophies:,}\n"
         
         return message
     
@@ -452,7 +453,8 @@ class MessageGenerator:
         message = f"⚔️ *История войн* (стр. {page}/{total_pages})\n\n"
         
         for i, war in enumerate(wars, 1):
-            opponent_name = war['opponent_name']
+            # Escape special characters in opponent names to prevent parsing errors
+            opponent_name = war['opponent_name'].replace('*', '\\*').replace('_', '\\_').replace('[', '\\[').replace(']', '\\]').replace('`', '\\`')
             team_size = war['team_size']
             clan_stars = war['clan_stars']
             opponent_stars = war['opponent_stars']
@@ -462,7 +464,7 @@ class MessageGenerator:
             result_emoji = {"win": "🏆", "lose": "❌", "tie": "🤝"}.get(result, "❓")
             war_type = "🏆 ЛВК" if is_cwl else "⚔️ КВ"
             
-            message += f"**{i}.** {result_emoji} vs {opponent_name}\n"
+            message += f"*{i}.* {result_emoji} vs {opponent_name}\n"
             message += f"   {war_type} {team_size}на{team_size} | {clan_stars}⭐ - {opponent_stars}⭐\n\n"
         
         return message
@@ -534,28 +536,33 @@ class MessageGenerator:
             
             if subscription and subscription.is_active and not subscription.is_expired():
                 # У пользователя есть активная подписка
+                subscription_type_display = "👑 ПРО ПЛЮС" if "proplus" in subscription.subscription_type else "💎 Премиум"
                 message = (
-                    f"💎 <b>Ваша премиум подписка</b>\n\n"
+                    f"{subscription_type_display} <b>Ваша подписка</b>\n\n"
                     f"📅 Тип: {self.payment_service.get_subscription_name(subscription.subscription_type)}\n"
                     f"⏰ Действует до: {subscription.end_date.strftime('%d.%m.%Y %H:%M')}\n"
                     f"📊 Дней осталось: {subscription.days_remaining()}\n\n"
-                    f"Хотите продлить премиум подписку?"
+                    f"Хотите продлить или изменить подписку?"
                 )
-                keyboard = Keyboards.subscription_status()
+                keyboard = Keyboards.subscription_status(True)
             else:
                 # У пользователя нет активной подписки
                 message = (
-                    f"💎 <b>Премиум подписка</b>\n\n"
-                    f"🚀 <b>Активируйте премиум и получите:</b>\n\n"
-                    f"✨ <b>Эксклюзивные возможности:</b>\n"
+                    f"💎 <b>Премиум подписки</b>\n\n"
+                    f"🚀 <b>Выберите тип подписки:</b>\n\n"
+                    f"💎 <b>Премиум:</b>\n"
+                    f"• 🔔 Расширенные уведомления\n"
+                    f"• 📊 Базовая статистика\n"
+                    f"• 🎯 Дополнительные функции\n\n"
+                    f"👑 <b>ПРО ПЛЮС:</b>\n"
+                    f"• ✨ Все функции Премиум\n"
                     f"• 🔥 Приоритетная поддержка\n"
-                    f"• 📊 Расширенная статистика войн\n"
-                    f"• 🔔 Персональные уведомления\n"
-                    f"• 🎯 Дополнительные инструменты\n"
-                    f"• 🛡️ Премиум функции клана\n\n"
-                    f"💰 <b>Выберите период активации:</b>"
+                    f"• 📈 Расширенная аналитика\n"
+                    f"• 🛡️ Эксклюзивные функции\n"
+                    f"• ⚙️ Персональные настройки\n\n"
+                    f"💰 <b>Выберите подписку:</b>"
                 )
-                keyboard = Keyboards.subscription_periods()
+                keyboard = Keyboards.subscription_types()
             
             if hasattr(update, 'callback_query') and update.callback_query:
                 await update.callback_query.edit_message_text(
@@ -578,6 +585,74 @@ class MessageGenerator:
                 await update.callback_query.edit_message_text(error_message)
             else:
                 await update.message.reply_text(error_message)
+    
+    async def handle_subscription_type_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                                subscription_type: str):
+        """Обработка выбора типа подписки"""
+        try:
+            if subscription_type == "premium":
+                message = (
+                    f"💎 <b>Премиум подписка</b>\n\n"
+                    f"🔔 Расширенные уведомления\n"
+                    f"📊 Базовая статистика\n"
+                    f"🎯 Дополнительные функции\n\n"
+                    f"💰 <b>Выберите период:</b>"
+                )
+            else:  # proplus
+                message = (
+                    f"👑 <b>ПРО ПЛЮС подписка</b>\n\n"
+                    f"✨ Все функции Премиум\n"
+                    f"🔥 Приоритетная поддержка\n"
+                    f"📈 Расширенная аналитика\n"
+                    f"🛡️ Эксклюзивные функции\n"
+                    f"⚙️ Персональные настройки\n\n"
+                    f"💰 <b>Выберите период:</b>"
+                )
+            
+            keyboard = Keyboards.subscription_periods(subscription_type)
+            
+            await update.callback_query.edit_message_text(
+                message, 
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при выборе типа подписки: {e}")
+            await update.callback_query.edit_message_text("Произошла ошибка при выборе типа подписки.")
+    
+    async def handle_subscription_payment_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                                     subscription_type: str):
+        """Обработка подтверждения оплаты подписки"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            price = self.payment_service.get_subscription_price(subscription_type)
+            name = self.payment_service.get_subscription_name(subscription_type)
+            
+            message = (
+                f"💳 <b>Подтверждение оплаты</b>\n\n"
+                f"📦 Услуга: {name}\n"
+                f"💰 Стоимость: {price}₽\n\n"
+                f"❓ Подтвердите оплату данной подписки?"
+            )
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Подтвердить оплату", 
+                                    callback_data=f"confirm_payment:{subscription_type}")],
+                [InlineKeyboardButton("❌ Отменить", 
+                                    callback_data=Keyboards.SUBSCRIPTION_CALLBACK)]
+            ])
+            
+            await update.callback_query.edit_message_text(
+                message, 
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при подтверждении оплаты: {e}")
+            await update.callback_query.edit_message_text("Произошла ошибка при подтверждении оплаты.")
     
     async def handle_subscription_period_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
                                                   subscription_type: str):
@@ -943,6 +1018,162 @@ class MessageGenerator:
         message += f"\n💰 Общая сумма бонусов: {total_amount:,} 💎"
         
         return message
+    
+    async def handle_notifications_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка меню уведомлений"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Проверяем статус подписки пользователя
+            subscription = await self.db_service.get_subscription(chat_id)
+            is_premium = subscription and subscription.is_active and not subscription.is_expired()
+            
+            # Проверяем статус уведомлений
+            notification_status = await self.db_service.is_notifications_enabled(chat_id)
+            
+            message = (
+                f"🔔 <b>Настройки уведомлений</b>\n\n"
+                f"📊 Статус: {'✅ Включены' if notification_status else '❌ Отключены'}\n"
+            )
+            
+            if is_premium:
+                message += (
+                    f"💎 Статус подписки: {'👑 ПРО ПЛЮС' if 'proplus' in subscription.subscription_type else '💎 Премиум'}\n\n"
+                    f"🔔 Базовые уведомления за 1 час до КВ\n"
+                    f"⚙️ Доступны расширенные настройки"
+                )
+            else:
+                message += (
+                    f"📱 Доступны базовые уведомления за 1 час до КВ\n"
+                    f"💎 Для расширенных настроек активируйте подписку"
+                )
+            
+            keyboard = Keyboards.notification_menu(is_premium)
+            
+            await update.message.reply_text(
+                message, 
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при обработке меню уведомлений: {e}")
+            await update.message.reply_text("Произошла ошибка при загрузке настроек уведомлений.")
+    
+    async def handle_notification_toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE, message_id: int):
+        """Обработка переключения уведомлений"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Переключаем статус уведомлений
+            current_status = await self.db_service.is_notifications_enabled(chat_id)
+            
+            if current_status:
+                success = await self.db_service.disable_notifications(chat_id)
+                message = "❌ Уведомления отключены"
+            else:
+                success = await self.db_service.enable_notifications(chat_id)
+                message = "✅ Уведомления включены"
+            
+            if success:
+                await update.callback_query.edit_message_text(message)
+            else:
+                await update.callback_query.edit_message_text("❌ Ошибка при изменении настроек")
+        
+        except Exception as e:
+            logger.error(f"Ошибка при переключении уведомлений: {e}")
+            await update.callback_query.edit_message_text("Произошла ошибка при изменении настроек.")
+    
+    async def handle_premium_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка меню для премиум подписчиков"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Проверяем статус подписки
+            subscription = await self.db_service.get_subscription(chat_id)
+            
+            if not subscription or not subscription.is_active or subscription.is_expired():
+                await update.callback_query.edit_message_text(
+                    "❌ У вас нет активной подписки.\n"
+                    "Оформите подписку для доступа к премиум функциям.",
+                    reply_markup=Keyboards.subscription_status(False)
+                )
+                return
+            
+            subscription_type_display = "👑 ПРО ПЛЮС" if "proplus" in subscription.subscription_type else "💎 Премиум"
+            
+            message = (
+                f"{subscription_type_display} <b>Меню премиум</b>\n\n"
+                f"🎉 Добро пожаловать в премиум меню!\n\n"
+                f"📅 Подписка действует до: {subscription.end_date.strftime('%d.%m.%Y')}\n"
+                f"⏰ Дней осталось: {subscription.days_remaining()}\n\n"
+                f"🔧 Доступные функции:\n"
+                f"• 🔔 Расширенные уведомления\n"
+                f"• ⚙️ Персональные настройки\n"
+                f"• 📊 Дополнительная статистика"
+            )
+            
+            keyboard = Keyboards.premium_menu()
+            
+            await update.callback_query.edit_message_text(
+                message, 
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при обработке премиум меню: {e}")
+            await update.callback_query.edit_message_text("Произошла ошибка при загрузке премиум меню.")
+    
+    async def handle_advanced_notifications(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка расширенных настроек уведомлений"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Проверяем статус подписки
+            subscription = await self.db_service.get_subscription(chat_id)
+            
+            if not subscription or not subscription.is_active or subscription.is_expired():
+                await update.callback_query.edit_message_text(
+                    "❌ Расширенные настройки уведомлений доступны только для премиум подписчиков.",
+                    reply_markup=Keyboards.subscription_status(False)
+                )
+                return
+            
+            message = (
+                f"⚙️ <b>Расширенные настройки уведомлений</b>\n\n"
+                f"Настройте персональные уведомления о начале КВ.\n"
+                f"Можете указать время в минутах (m) или часах (h).\n"
+                f"Например: 14m, 2h, 30m\n\n"
+                f"⏰ Максимум: 24 часа до начала КВ\n\n"
+                f"Используйте кнопки ниже для настройки:"
+            )
+            
+            keyboard = Keyboards.notification_advanced_menu()
+            
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(message, parse_mode=ParseMode.HTML)
+                await update.callback_query.message.reply_text(
+                    "Выберите уведомление для настройки:",
+                    reply_markup=keyboard
+                )
+            else:
+                await update.message.reply_text(
+                    message, 
+                    parse_mode=ParseMode.HTML
+                )
+                await update.message.reply_text(
+                    "Выберите уведомление для настройки:",
+                    reply_markup=keyboard
+                )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при обработке расширенных настроек: {e}")
+            error_msg = "Произошла ошибка при загрузке расширенных настроек."
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(error_msg)
+            else:
+                await update.message.reply_text(error_msg)
     
     async def close(self):
         """Закрытие ресурсов"""

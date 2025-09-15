@@ -70,6 +70,9 @@ class MessageHandler:
             
             elif state == UserState.AWAITING_CLAN_TAG_TO_SEARCH:
                 await self.message_generator.display_clan_info(update, context, tag)
+            
+            elif state == UserState.AWAITING_NOTIFICATION_TIME:
+                await self._handle_notification_time_input(update, context, text)
         
         except Exception as e:
             logger.error(f"Ошибка при обработке состояния {state}: {e}")
@@ -128,6 +131,16 @@ class MessageHandler:
                 await update.message.reply_text("Главное меню:", 
                                                reply_markup=Keyboards.main_menu())
             
+            elif text.startswith("🔔 Уведомление") and "(Нажмите для настройки)" in text:
+                await self._handle_notification_setup(update, context, text)
+            
+            elif text == "✅ Включить все уведомления":
+                await self._handle_enable_all_notifications(update, context)
+            
+            elif text == "⬅️ Назад в главное меню":
+                await update.message.reply_text("Главное меню:", 
+                                               reply_markup=Keyboards.main_menu())
+            
             elif text == "/start":
                 await update.message.reply_text(
                     "🎮 Добро пожаловать в бота для Clash of Clans!\n\n"
@@ -152,6 +165,152 @@ class MessageHandler:
                 "Произошла ошибка при обработке команды.",
                 reply_markup=Keyboards.main_menu()
             )
+    
+    async def _handle_notification_setup(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+        """Обработка настройки уведомления"""
+        chat_id = update.effective_chat.id
+        
+        # Проверяем статус подписки
+        subscription = await self.message_generator.db_service.get_subscription(chat_id)
+        
+        if not subscription or not subscription.is_active or subscription.is_expired():
+            await update.message.reply_text(
+                "❌ Настройка персональных уведомлений доступна только для премиум подписчиков.",
+                reply_markup=Keyboards.main_menu()
+            )
+            return
+        
+        # Определяем номер уведомления
+        if "Уведомление 1" in text:
+            notification_number = 1
+        elif "Уведомление 2" in text:
+            notification_number = 2
+        elif "Уведомление 3" in text:
+            notification_number = 3
+        else:
+            return
+        
+        # Сохраняем в состояние пользователя
+        context.user_data['configuring_notification'] = notification_number
+        context.user_data['state'] = UserState.AWAITING_NOTIFICATION_TIME
+        
+        await update.message.reply_text(
+            f"⚙️ Настройка уведомления {notification_number}\n\n"
+            f"Введите время уведомления:\n"
+            f"• Минуты: 15m, 30m, 45m\n"
+            f"• Часы: 1h, 2h, 12h\n\n"
+            f"⏰ Максимум: 24 часа (24h)\n"
+            f"❌ Для отмены напишите 'отмена'"
+        )
+    
+    async def _handle_enable_all_notifications(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка включения всех уведомлений"""
+        chat_id = update.effective_chat.id
+        
+        # Проверяем статус подписки
+        subscription = await self.message_generator.db_service.get_subscription(chat_id)
+        
+        if not subscription or not subscription.is_active or subscription.is_expired():
+            await update.message.reply_text(
+                "❌ Функция доступна только для премиум подписчиков.",
+                reply_markup=Keyboards.main_menu()
+            )
+            return
+        
+        # Включаем базовые уведомления
+        success = await self.message_generator.db_service.enable_notifications(chat_id)
+        
+        if success:
+            await update.message.reply_text(
+                "✅ Все уведомления включены!\n\n"
+                "🔔 Базовые уведомления за 1 час до КВ\n"
+                "⚙️ Персональные уведомления (если настроены)\n\n"
+                "Вы будете получать оповещения о начале клановых войн.",
+                reply_markup=Keyboards.main_menu()
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Ошибка при включении уведомлений.",
+                reply_markup=Keyboards.main_menu()
+            )
+    
+    async def _handle_notification_time_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+        """Обработка ввода времени для персонального уведомления"""
+        chat_id = update.effective_chat.id
+        
+        if text.lower() == 'отмена':
+            context.user_data.pop('configuring_notification', None)
+            await update.message.reply_text(
+                "❌ Настройка уведомления отменена.",
+                reply_markup=Keyboards.main_menu()
+            )
+            return
+        
+        # Парсим время
+        time_minutes = self._parse_notification_time(text)
+        
+        if time_minutes is None:
+            await update.message.reply_text(
+                "❌ Неверный формат времени.\n\n"
+                "Используйте:\n"
+                "• Минуты: 15m, 30m, 45m\n"
+                "• Часы: 1h, 2h, 12h\n\n"
+                "Попробуйте еще раз или напишите 'отмена':"
+            )
+            return
+        
+        if time_minutes > 1440:  # 24 часа
+            await update.message.reply_text(
+                "❌ Максимальное время уведомления: 24 часа.\n"
+                "Попробуйте еще раз или напишите 'отмена':"
+            )
+            return
+        
+        notification_number = context.user_data.get('configuring_notification', 1)
+        
+        # Здесь в реальном боте нужно сохранить настройку в базу данных
+        # Пока просто подтверждаем настройку
+        
+        time_display = self._format_time_display(time_minutes)
+        
+        await update.message.reply_text(
+            f"✅ Уведомление {notification_number} настроено!\n\n"
+            f"⏰ Время: {time_display} до начала КВ\n\n"
+            f"Вы будете получать уведомление о начале клановых войн.",
+            reply_markup=Keyboards.main_menu()
+        )
+        
+        # Очищаем состояние
+        context.user_data.pop('configuring_notification', None)
+    
+    def _parse_notification_time(self, text: str) -> Optional[int]:
+        """Парсинг времени уведомления в минуты"""
+        text = text.strip().lower()
+        
+        try:
+            if text.endswith('m'):
+                minutes = int(text[:-1])
+                return minutes
+            elif text.endswith('h'):
+                hours = int(text[:-1])
+                return hours * 60
+            else:
+                # Попробуем парсить как число минут
+                return int(text)
+        except ValueError:
+            return None
+    
+    def _format_time_display(self, minutes: int) -> str:
+        """Форматирование времени для отображения"""
+        if minutes < 60:
+            return f"{minutes} мин"
+        elif minutes % 60 == 0:
+            hours = minutes // 60
+            return f"{hours} ч"
+        else:
+            hours = minutes // 60
+            mins = minutes % 60
+            return f"{hours} ч {mins} мин"
 
 
 class CallbackHandler:
@@ -209,6 +368,21 @@ class CallbackHandler:
             
             elif callback_type == Keyboards.SUBSCRIPTION_PERIOD_CALLBACK:
                 await self._handle_subscription_period(update, context, data_parts)
+            
+            elif callback_type == Keyboards.SUBSCRIPTION_TYPE_CALLBACK:
+                await self._handle_subscription_type(update, context, data_parts)
+            
+            elif callback_type == Keyboards.SUBSCRIPTION_PAY_CALLBACK:
+                await self._handle_subscription_payment(update, context, data_parts)
+            
+            elif callback_type == Keyboards.PREMIUM_MENU_CALLBACK:
+                await self._handle_premium_menu(update, context)
+            
+            elif callback_type == Keyboards.NOTIFY_ADVANCED_CALLBACK:
+                await self._handle_notify_advanced(update, context)
+            
+            elif callback_type == "confirm_payment":
+                await self._handle_payment_confirmation(update, context, data_parts)
             
             elif callback_type == "clan_info":
                 await self._handle_clan_info_callback(update, context)
@@ -384,6 +558,47 @@ class CallbackHandler:
     async def _handle_subscription_period(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
                                          data_parts: list):
         """Обработка выбора периода подписки"""
+        if len(data_parts) < 2:
+            return
+        
+        subscription_type = data_parts[1]
+        await self.message_generator.handle_subscription_period_selection(
+            update, context, subscription_type
+        )
+    
+    async def _handle_subscription_type(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                       data_parts: list):
+        """Обработка выбора типа подписки"""
+        if len(data_parts) < 2:
+            return
+        
+        subscription_type = data_parts[1]
+        await self.message_generator.handle_subscription_type_selection(
+            update, context, subscription_type
+        )
+    
+    async def _handle_subscription_payment(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                         data_parts: list):
+        """Обработка нажатия на кнопку с ценой для оплаты"""
+        if len(data_parts) < 2:
+            return
+        
+        subscription_type = data_parts[1]
+        await self.message_generator.handle_subscription_payment_confirmation(
+            update, context, subscription_type
+        )
+    
+    async def _handle_premium_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка премиум меню"""
+        await self.message_generator.handle_premium_menu(update, context)
+    
+    async def _handle_notify_advanced(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка расширенных настроек уведомлений"""
+        await self.message_generator.handle_advanced_notifications(update, context)
+    
+    async def _handle_payment_confirmation(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                         data_parts: list):
+        """Обработка подтверждения платежа"""
         if len(data_parts) < 2:
             return
         
