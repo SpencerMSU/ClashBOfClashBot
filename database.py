@@ -273,6 +273,26 @@ class DatabaseService:
                     for row in rows
                 ]
     
+    async def get_cwl_bonus_data(self, year_month: str) -> List[Dict]:
+        """Получение данных о бонусах ЛВК за указанный месяц"""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("""
+                SELECT bonus_results_json FROM cwl_seasons 
+                WHERE season_date LIKE ?
+            """, (f"{year_month}%",)) as cursor:
+                row = await cursor.fetchone()
+                
+                if row and row[0]:
+                    try:
+                        import json
+                        bonus_data = json.loads(row[0])
+                        return bonus_data if isinstance(bonus_data, list) else []
+                    except json.JSONDecodeError:
+                        logger.error(f"Ошибка декодирования JSON бонусов ЛВК для {year_month}")
+                        return []
+                
+                return []
+    
     async def get_war_details(self, end_time: str) -> Optional[Dict]:
         """Получение детальной информации о войне"""
         async with aiosqlite.connect(self.db_path) as db:
