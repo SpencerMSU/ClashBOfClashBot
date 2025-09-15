@@ -37,3 +37,42 @@ build/
 ### Mac OS ###
 .DS_Store
 /src/main/resources/config.properties
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Environment variables
+.env
+
+# Database
+*.db
+clashbot.db
+
+# Logs
+*.log
+logs/
