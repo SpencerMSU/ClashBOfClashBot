@@ -10,6 +10,7 @@ import json
 from models.user import User
 from models.war import WarToSave, AttackData
 from models.subscription import Subscription
+from models.building import BuildingSnapshot, BuildingUpgrade, BuildingTracker
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,28 @@ class DatabaseService:
                     currency TEXT DEFAULT 'RUB',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                )
+            """)
+            
+            # Создание таблицы отслеживания зданий
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS building_trackers (
+                    telegram_id INTEGER PRIMARY KEY,
+                    player_tag TEXT NOT NULL,
+                    is_active INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    last_check TEXT
+                )
+            """)
+            
+            # Создание таблицы снимков зданий
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS building_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    player_tag TEXT NOT NULL,
+                    snapshot_time TEXT NOT NULL,
+                    buildings_data TEXT NOT NULL,
+                    UNIQUE(player_tag, snapshot_time)
                 )
             """)
             
@@ -517,3 +540,98 @@ class DatabaseService:
             async with db.execute("SELECT telegram_id FROM notifications") as cursor:
                 rows = await cursor.fetchall()
                 return [row[0] for row in rows]
+    
+    # Building tracking methods
+    async def save_building_tracker(self, tracker: BuildingTracker) -> bool:
+        """Сохранение настроек отслеживания зданий"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("""
+                    INSERT OR REPLACE INTO building_trackers 
+                    (telegram_id, player_tag, is_active, created_at, last_check)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (tracker.telegram_id, tracker.player_tag, int(tracker.is_active), 
+                      tracker.created_at, tracker.last_check))
+                await db.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении настроек отслеживания: {e}")
+            return False
+    
+    async def get_building_tracker(self, telegram_id: int) -> Optional[BuildingTracker]:
+        """Получение настроек отслеживания зданий пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT telegram_id, player_tag, is_active, created_at, last_check FROM building_trackers WHERE telegram_id = ?",
+                (telegram_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return BuildingTracker(
+                        telegram_id=row[0],
+                        player_tag=row[1],
+                        is_active=bool(row[2]),
+                        created_at=row[3],
+                        last_check=row[4]
+                    )
+                return None
+    
+    async def get_active_building_trackers(self) -> List[BuildingTracker]:
+        """Получение всех активных отслеживателей зданий"""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT telegram_id, player_tag, is_active, created_at, last_check FROM building_trackers WHERE is_active = 1"
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [BuildingTracker(
+                    telegram_id=row[0],
+                    player_tag=row[1], 
+                    is_active=bool(row[2]),
+                    created_at=row[3],
+                    last_check=row[4]
+                ) for row in rows]
+    
+    async def save_building_snapshot(self, snapshot: BuildingSnapshot) -> bool:
+        """Сохранение снимка состояния зданий"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("""
+                    INSERT OR REPLACE INTO building_snapshots 
+                    (player_tag, snapshot_time, buildings_data)
+                    VALUES (?, ?, ?)
+                """, (snapshot.player_tag, snapshot.snapshot_time, snapshot.buildings_data))
+                await db.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении снимка зданий: {e}")
+            return False
+    
+    async def get_latest_building_snapshot(self, player_tag: str) -> Optional[BuildingSnapshot]:
+        """Получение последнего снимка зданий игрока"""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT player_tag, snapshot_time, buildings_data FROM building_snapshots WHERE player_tag = ? ORDER BY snapshot_time DESC LIMIT 1",
+                (player_tag,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return BuildingSnapshot(
+                        player_tag=row[0],
+                        snapshot_time=row[1],
+                        buildings_data=row[2]
+                    )
+                return None
+    
+    async def update_tracker_last_check(self, telegram_id: int, last_check: str) -> bool:
+        """Обновление времени последней проверки отслеживателя"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    "UPDATE building_trackers SET last_check = ? WHERE telegram_id = ?",
+                    (last_check, telegram_id)
+                )
+                await db.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при обновлении времени проверки: {e}")
+            return False

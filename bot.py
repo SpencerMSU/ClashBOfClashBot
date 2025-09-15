@@ -13,6 +13,7 @@ from coc_api import CocApiClient
 from handlers import MessageHandler as BotMessageHandler, CallbackHandler as BotCallbackHandler
 from message_generator import MessageGenerator
 from war_archiver import WarArchiver
+from building_monitor import BuildingMonitor
 from keyboards import Keyboards
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,9 @@ class ClashBot:
         
         # Архиватор войн
         self.war_archiver = None
+        
+        # Монитор зданий
+        self.building_monitor = None
         
         # Приложение Telegram
         self.application = None
@@ -80,6 +84,9 @@ class ClashBot:
             
             # Запуск архиватора войн
             await self._start_war_archiver()
+            
+            # Запуск монитора зданий
+            await self._start_building_monitor()
             
             logger.info("Компоненты бота успешно инициализированы")
             
@@ -131,6 +138,20 @@ class ClashBot:
         except Exception as e:
             logger.error(f"Ошибка при запуске архиватора войн: {e}")
     
+    async def _start_building_monitor(self):
+        """Запуск монитора зданий"""
+        try:
+            self.building_monitor = BuildingMonitor(
+                db_service=self.db_service,
+                coc_client=self.coc_client,
+                bot_instance=self.bot_instance
+            )
+            await self.building_monitor.start()
+            logger.info("Монитор зданий запущен")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при запуске монитора зданий: {e}")
+    
     async def run(self):
         """Запуск бота"""
         try:
@@ -142,6 +163,9 @@ class ClashBot:
             
             # Start the application
             await self.application.start()
+            
+            # Store building monitor in bot_data for access in handlers
+            self.application.bot_data['building_monitor'] = self.building_monitor
             
             logger.info("Запуск бота...")
             # Start polling with proper lifecycle management
@@ -174,6 +198,10 @@ class ClashBot:
             # Остановка архиватора
             if self.war_archiver:
                 await self.war_archiver.stop()
+            
+            # Остановка монитора зданий
+            if self.building_monitor:
+                await self.building_monitor.stop()
             
             # Закрытие клиента COC API
             if hasattr(self.coc_client, 'close'):
