@@ -892,7 +892,7 @@ class MessageGenerator:
             }
             month_name = month_names.get(month, month)
             display_date = f"{month_name} {year}"
-        except:
+        except Exception:
             display_date = year_month
         
         message = f"🏆 *Бонусы ЛВК - {display_date}*\n\n"
