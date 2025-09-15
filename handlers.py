@@ -5,6 +5,7 @@ import logging
 from typing import Dict, Any, Optional
 from telegram import Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from telegram.constants import ParseMode
 
 from keyboards import Keyboards, WarSort, MemberSort, MemberView
 from user_state import UserState
@@ -197,6 +198,9 @@ class CallbackHandler:
             elif callback_type == Keyboards.SUBSCRIPTION_PERIOD_CALLBACK:
                 await self._handle_subscription_period(update, context, data_parts)
             
+            elif callback_type == "clan_info":
+                await self._handle_clan_info_callback(update, context)
+            
             elif callback_type == "main_menu":
                 await query.edit_message_text("Главное меню:")
                 await query.message.reply_text("Выберите действие:", 
@@ -282,9 +286,41 @@ class CallbackHandler:
             return
         
         player_tag = data_parts[1]
+        
+        # Создаем кнопку "назад к участникам" если профиль просматривается из списка участников
+        back_keyboard = None
+        inspecting_clan = context.user_data.get('inspecting_clan')
+        if inspecting_clan:
+            back_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Назад к участникам", 
+                                    callback_data=Keyboards.MEMBERS_CALLBACK)],
+                [InlineKeyboardButton("🛡 К информации о клане", 
+                                    callback_data="clan_info")]
+            ])
+        
         await self.message_generator.display_player_info(
-            update, context, player_tag, Keyboards.clan_inspection_menu()
+            update, context, player_tag, back_keyboard
         )
+    
+    async def _handle_clan_info_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка возврата к информации о клане"""
+        clan_tag = context.user_data.get('inspecting_clan')
+        if clan_tag:
+            # Получаем информацию о клане заново и отображаем
+            async with self.message_generator.coc_client as client:
+                clan_data = await client.get_clan_info(clan_tag)
+                
+                if clan_data:
+                    message = self.message_generator._format_clan_info(clan_data)
+                    keyboard = Keyboards.clan_inspection_menu()
+                    
+                    await update.callback_query.edit_message_text(
+                        message, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
+                    )
+                else:
+                    await update.callback_query.edit_message_text("❌ Не удалось получить информацию о клане.")
+        else:
+            await update.callback_query.edit_message_text("Ошибка: клан не выбран.")
     
     async def _handle_cwl_bonus(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
                                data_parts: list):
