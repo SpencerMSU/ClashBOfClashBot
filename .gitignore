@@ -36,4 +36,7 @@ build/
 
 ### Mac OS ###
 .DS_Store
-/src/main/resources/config.properties
+
+### Application configuration ###
+src/main/resources/config.properties
+clashbot.db
