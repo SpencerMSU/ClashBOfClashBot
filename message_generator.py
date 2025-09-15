@@ -76,8 +76,8 @@ class MessageGenerator:
             )
             return
         
-        await self.display_player_info(update, context, user.player_tag, 
-                                     Keyboards.clan_inspection_menu())
+        # Display profile info without clan inspection menu - just profile info
+        await self.display_player_info(update, context, user.player_tag, None)
     
     async def handle_link_account(self, update: Update, context: ContextTypes.DEFAULT_TYPE, player_tag: str):
         """Обработка привязки аккаунта"""
@@ -309,6 +309,40 @@ class MessageGenerator:
         message += f"🥇 Лучший результат: {best_trophies:,}\n"
         message += f"⭐ Уровень опыта: {exp_level}\n"
         
+        # Add war stars information
+        war_stars = player_data.get('warStars', 0)
+        attack_wins = player_data.get('attackWins', 0)
+        defense_wins = player_data.get('defenseWins', 0)
+        
+        message += f"🌟 Звезды войн: {war_stars:,}\n"
+        message += f"⚔️ Побед в атаке: {attack_wins:,}\n"
+        message += f"🛡️ Побед в защите: {defense_wins:,}\n"
+        
+        # Add donations information
+        donations = player_data.get('donations', 0)
+        received = player_data.get('donationsReceived', 0)
+        message += f"📤 Отдано войск: {donations:,}\n"
+        message += f"📥 Получено войск: {received:,}\n"
+        
+        # Add league information
+        league = player_data.get('league')
+        if league:
+            league_name = league.get('name', 'Неизвестно')
+            message += f"🏅 Лига: {league_name}\n"
+        
+        # Add builder hall information
+        builder_hall_level = player_data.get('builderHallLevel', 0)
+        versus_trophies = player_data.get('versusTrophies', 0)
+        best_versus_trophies = player_data.get('bestVersusTrophies', 0)
+        versus_battle_wins = player_data.get('versusBattleWins', 0)
+        
+        if builder_hall_level > 0:
+            message += f"\n🏗️ *База строителя:*\n"
+            message += f"🏘️ Дом строителя: {builder_hall_level} уровень\n"
+            message += f"🏆 Трофеи против: {versus_trophies:,}\n"
+            message += f"🥇 Лучший результат против: {best_versus_trophies:,}\n"
+            message += f"⚔️ Побед против: {versus_battle_wins:,}\n"
+        
         # Информация о клане
         clan_info = player_data.get('clan')
         if clan_info:
@@ -320,6 +354,11 @@ class MessageGenerator:
             message += f"\n🛡 *Клан:* {clan_name}\n"
             message += f"🏷 `{clan_tag}`\n"
             message += f"👑 Роль: {role_text}"
+            
+            # Add clan level if available
+            clan_level = clan_info.get('clanLevel', 0)
+            if clan_level > 0:
+                message += f"\n🎖️ Уровень клана: {clan_level}"
         else:
             message += f"\n🚫 Не состоит в клане"
         
@@ -649,6 +688,241 @@ class MessageGenerator:
         
         except Exception as e:
             logger.error(f"Ошибка при обработке успешного платежа: {e}")
+    
+    async def display_current_war(self, update: Update, context: ContextTypes.DEFAULT_TYPE, clan_tag: str):
+        """Отображение информации о текущей войне клана"""
+        try:
+            async with self.coc_client as client:
+                war_data = await client.get_clan_current_war(clan_tag)
+                
+                if not war_data:
+                    await update.callback_query.edit_message_text(
+                        "❌ Не удалось получить информацию о текущей войне."
+                    )
+                    return
+                
+                # Check war state
+                state = war_data.get('state', 'notInWar')
+                
+                if state == 'notInWar':
+                    await update.callback_query.edit_message_text(
+                        "🕊️ Клан сейчас не участвует в войне."
+                    )
+                    return
+                
+                # Format current war information
+                message = self._format_current_war_info(war_data)
+                
+                await update.callback_query.edit_message_text(
+                    message, parse_mode=ParseMode.MARKDOWN
+                )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при получении информации о текущей войне: {e}")
+            await update.callback_query.edit_message_text(
+                "❌ Произошла ошибка при получении информации о войне."
+            )
+    
+    async def display_cwl_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE, clan_tag: str):
+        """Отображение информации о Лиге войн кланов (CWL)"""
+        try:
+            async with self.coc_client as client:
+                cwl_data = await client.get_clan_war_league_group(clan_tag)
+                
+                if not cwl_data:
+                    await update.callback_query.edit_message_text(
+                        "❌ Клан не участвует в текущем сезоне ЛВК."
+                    )
+                    return
+                
+                # Format CWL information
+                message = self._format_cwl_info(cwl_data)
+                
+                await update.callback_query.edit_message_text(
+                    message, parse_mode=ParseMode.MARKDOWN
+                )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при получении информации о ЛВК: {e}")
+            await update.callback_query.edit_message_text(
+                "❌ Произошла ошибка при получении информации о ЛВК."
+            )
+    
+    def _format_current_war_info(self, war_data: Dict[Any, Any]) -> str:
+        """Форматирование информации о текущей войне"""
+        state = war_data.get('state', 'unknown')
+        team_size = war_data.get('teamSize', 0)
+        
+        # Get clan and opponent info
+        clan = war_data.get('clan', {})
+        opponent = war_data.get('opponent', {})
+        
+        clan_name = clan.get('name', 'Неизвестно')
+        clan_stars = clan.get('stars', 0)
+        clan_destruction = clan.get('destructionPercentage', 0.0)
+        clan_attacks = clan.get('attacks', 0)
+        
+        opponent_name = opponent.get('name', 'Неизвестно')
+        opponent_stars = opponent.get('stars', 0)
+        opponent_destruction = opponent.get('destructionPercentage', 0.0)
+        opponent_attacks = opponent.get('attacks', 0)
+        
+        # State translations
+        state_translations = {
+            'preparation': '🔄 Подготовка',
+            'inWar': '⚔️ Идет война',
+            'warEnded': '🏁 Война завершена'
+        }
+        
+        state_text = state_translations.get(state, '❓ Неизвестно')
+        
+        message = f"⚔️ *Текущая война*\n\n"
+        message += f"📊 Статус: {state_text}\n"
+        message += f"👥 Размер: {team_size} на {team_size}\n\n"
+        
+        message += f"🛡️ *{clan_name}*\n"
+        message += f"⭐ Звезды: {clan_stars}\n"
+        message += f"💥 Разрушение: {clan_destruction:.1f}%\n"
+        message += f"⚔️ Атак использовано: {clan_attacks}\n\n"
+        
+        message += f"🛡️ *{opponent_name}*\n"
+        message += f"⭐ Звезды: {opponent_stars}\n"
+        message += f"💥 Разрушение: {opponent_destruction:.1f}%\n"
+        message += f"⚔️ Атак использовано: {opponent_attacks}\n\n"
+        
+        # Show time information based on state
+        if state == 'preparation':
+            start_time = war_data.get('startTime')
+            if start_time:
+                message += f"🕐 Начало войны: {start_time}\n"
+        elif state == 'inWar':
+            end_time = war_data.get('endTime')
+            if end_time:
+                message += f"🕐 Конец войны: {end_time}\n"
+        
+        return message
+    
+    def _format_cwl_info(self, cwl_data: Dict[Any, Any]) -> str:
+        """Форматирование информации о ЛВК"""
+        state = cwl_data.get('state', 'unknown')
+        season = cwl_data.get('season', 'Неизвестно')
+        
+        # State translations
+        state_translations = {
+            'preparation': '🔄 Подготовка',
+            'inWar': '⚔️ Идет ЛВК',
+            'ended': '🏁 ЛВК завершена'
+        }
+        
+        state_text = state_translations.get(state, '❓ Неизвестно')
+        
+        message = f"🏆 *Лига войн кланов*\n\n"
+        message += f"📅 Сезон: {season}\n"
+        message += f"📊 Статус: {state_text}\n\n"
+        
+        # Get clans in the league
+        clans = cwl_data.get('clans', [])
+        if clans:
+            message += f"🛡️ *Участники лиги ({len(clans)} кланов):*\n"
+            for i, clan in enumerate(clans[:8], 1):  # Show up to 8 clans
+                clan_name = clan.get('name', 'Неизвестно')
+                clan_level = clan.get('clanLevel', 0)
+                message += f"{i}. {clan_name} (ур. {clan_level})\n"
+            
+            if len(clans) > 8:
+                message += f"... и еще {len(clans) - 8} кланов\n"
+        
+        # Get rounds information
+        rounds = cwl_data.get('rounds', [])
+        if rounds:
+            message += f"\n📋 *Раунды:* {len(rounds)}\n"
+            
+            # Show current round info if available
+            current_round = None
+            for i, round_data in enumerate(rounds):
+                war_tags = round_data.get('warTags', [])
+                if war_tags and war_tags[0] != '#0':
+                    current_round = i + 1
+                    break
+            
+            if current_round:
+                message += f"⚔️ Текущий раунд: {current_round}\n"
+        
+        return message
+    
+    async def display_cwl_bonus_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE, year_month: str):
+        """Отображение информации о бонусах ЛВК"""
+        try:
+            # Get CWL bonus data from database for the specified month
+            bonus_data = await self.db_service.get_cwl_bonus_data(year_month)
+            
+            if not bonus_data:
+                await update.callback_query.edit_message_text(
+                    f"❌ Данные о бонусах ЛВК за {year_month} не найдены."
+                )
+                return
+            
+            # Format bonus information  
+            message = self._format_cwl_bonus_info(bonus_data, year_month)
+            
+            await update.callback_query.edit_message_text(
+                message, parse_mode=ParseMode.MARKDOWN
+            )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при получении информации о бонусах ЛВК: {e}")
+            await update.callback_query.edit_message_text(
+                "❌ Произошла ошибка при получении информации о бонусах ЛВК."
+            )
+    
+    def _format_cwl_bonus_info(self, bonus_data: List[Dict], year_month: str) -> str:
+        """Форматирование информации о бонусах ЛВК"""
+        # Parse year-month for display
+        try:
+            year, month = year_month.split('-')
+            month_names = {
+                '01': 'Январь', '02': 'Февраль', '03': 'Март', '04': 'Апрель',
+                '05': 'Май', '06': 'Июнь', '07': 'Июль', '08': 'Август',
+                '09': 'Сентябрь', '10': 'Октябрь', '11': 'Ноябрь', '12': 'Декабрь'
+            }
+            month_name = month_names.get(month, month)
+            display_date = f"{month_name} {year}"
+        except:
+            display_date = year_month
+        
+        message = f"🏆 *Бонусы ЛВК - {display_date}*\n\n"
+        
+        if not bonus_data:
+            message += "📭 Данные о бонусах не найдены."
+            return message
+        
+        total_bonuses = len(bonus_data)
+        message += f"📊 Всего бонусов выдано: {total_bonuses}\n\n"
+        
+        # Group bonuses by player
+        player_bonuses = {}
+        for bonus in bonus_data:
+            player_name = bonus.get('player_name', 'Неизвестно')
+            bonus_amount = bonus.get('bonus_amount', 0)
+            if player_name not in player_bonuses:
+                player_bonuses[player_name] = 0
+            player_bonuses[player_name] += bonus_amount
+        
+        # Sort players by total bonus amount
+        sorted_players = sorted(player_bonuses.items(), key=lambda x: x[1], reverse=True)
+        
+        message += "🎖️ *Игроки и их бонусы:*\n"
+        for i, (player_name, total_bonus) in enumerate(sorted_players[:10], 1):
+            message += f"{i}. {player_name}: {total_bonus:,} 💎\n"
+        
+        if len(sorted_players) > 10:
+            message += f"... и еще {len(sorted_players) - 10} игроков\n"
+        
+        # Calculate total bonus amount
+        total_amount = sum(player_bonuses.values())
+        message += f"\n💰 Общая сумма бонусов: {total_amount:,} 💎"
+        
+        return message
     
     async def close(self):
         """Закрытие ресурсов"""
