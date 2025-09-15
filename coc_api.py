@@ -23,13 +23,23 @@ class CocApiClient:
     
     async def __aenter__(self):
         """Асинхронный контекстный менеджер - вход"""
-        self.session = aiohttp.ClientSession(
-            headers={
-                'Authorization': f'Bearer {self.api_token}',
-                'Content-Type': 'application/json'
-            },
-            timeout=aiohttp.ClientTimeout(total=30)
-        )
+        if not self.session:
+            # Создаем коннектор с пулом соединений для оптимизации
+            connector = aiohttp.TCPConnector(
+                limit=100,  # Максимум 100 соединений в пуле
+                limit_per_host=30,  # Максимум 30 соединений на хост
+                enable_cleanup_closed=True,
+                keepalive_timeout=300  # Держим соединения живыми 5 минут
+            )
+            
+            self.session = aiohttp.ClientSession(
+                headers={
+                    'Authorization': f'Bearer {self.api_token}',
+                    'Content-Type': 'application/json'
+                },
+                timeout=aiohttp.ClientTimeout(total=10),  # Уменьшили таймаут до 10 секунд
+                connector=connector
+            )
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -40,12 +50,21 @@ class CocApiClient:
     async def _make_request(self, endpoint: str) -> Optional[Dict[Any, Any]]:
         """Базовый метод для выполнения HTTP запросов"""
         if not self.session:
+            # Создаем коннектор с пулом соединений для оптимизации
+            connector = aiohttp.TCPConnector(
+                limit=100,  # Максимум 100 соединений в пуле
+                limit_per_host=30,  # Максимум 30 соединений на хост
+                enable_cleanup_closed=True,
+                keepalive_timeout=300  # Держим соединения живыми 5 минут
+            )
+            
             self.session = aiohttp.ClientSession(
                 headers={
                     'Authorization': f'Bearer {self.api_token}',
                     'Content-Type': 'application/json'
                 },
-                timeout=aiohttp.ClientTimeout(total=30)
+                timeout=aiohttp.ClientTimeout(total=10),  # Уменьшили таймаут до 10 секунд
+                connector=connector
             )
         
         url = f"{self.base_url}{endpoint}"

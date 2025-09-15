@@ -5,6 +5,7 @@ import logging
 from typing import Dict, Any, Optional
 from telegram import Update, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from telegram.constants import ParseMode
 
 from keyboards import Keyboards, WarSort, MemberSort, MemberView
 from user_state import UserState
@@ -161,7 +162,10 @@ class CallbackHandler:
         message_id = query.message.message_id
         
         try:
-            if callback_type == Keyboards.MEMBERS_SORT_CALLBACK:
+            if callback_type == Keyboards.MEMBERS_CALLBACK:
+                await self._handle_members_callback(update, context)
+            
+            elif callback_type == Keyboards.MEMBERS_SORT_CALLBACK:
                 await self._handle_members_sort(update, context, data_parts)
             
             elif callback_type == Keyboards.MEMBERS_VIEW_CALLBACK:
@@ -193,6 +197,9 @@ class CallbackHandler:
             
             elif callback_type == Keyboards.SUBSCRIPTION_PERIOD_CALLBACK:
                 await self._handle_subscription_period(update, context, data_parts)
+            
+            elif callback_type == "clan_info":
+                await self._handle_clan_info_callback(update, context)
             
             elif callback_type == "main_menu":
                 await query.edit_message_text("Главное меню:")
@@ -236,6 +243,18 @@ class CallbackHandler:
     async def _handle_war_list(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
                               data_parts: list):
         """Обработка списка войн"""
+        # Handle initial war list button click (just "warlist")
+        if len(data_parts) == 1:
+            clan_tag = context.user_data.get('inspecting_clan')
+            if clan_tag:
+                await self.message_generator.display_war_list_page(
+                    update, context, clan_tag, sort_order="recent", page=1
+                )
+            else:
+                await update.callback_query.edit_message_text("Ошибка: клан не выбран.")
+            return
+        
+        # Handle pagination and sorting (warlist:clan_tag:sort_order:page)
         if len(data_parts) < 4:
             return
         
@@ -267,9 +286,41 @@ class CallbackHandler:
             return
         
         player_tag = data_parts[1]
+        
+        # Создаем кнопку "назад к участникам" если профиль просматривается из списка участников
+        back_keyboard = None
+        inspecting_clan = context.user_data.get('inspecting_clan')
+        if inspecting_clan:
+            back_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Назад к участникам", 
+                                    callback_data=Keyboards.MEMBERS_CALLBACK)],
+                [InlineKeyboardButton("🛡 К информации о клане", 
+                                    callback_data="clan_info")]
+            ])
+        
         await self.message_generator.display_player_info(
-            update, context, player_tag, Keyboards.clan_inspection_menu()
+            update, context, player_tag, back_keyboard
         )
+    
+    async def _handle_clan_info_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка возврата к информации о клане"""
+        clan_tag = context.user_data.get('inspecting_clan')
+        if clan_tag:
+            # Получаем информацию о клане заново и отображаем
+            async with self.message_generator.coc_client as client:
+                clan_data = await client.get_clan_info(clan_tag)
+                
+                if clan_data:
+                    message = self.message_generator._format_clan_info(clan_data)
+                    keyboard = Keyboards.clan_inspection_menu()
+                    
+                    await update.callback_query.edit_message_text(
+                        message, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
+                    )
+                else:
+                    await update.callback_query.edit_message_text("❌ Не удалось получить информацию о клане.")
+        else:
+            await update.callback_query.edit_message_text("Ошибка: клан не выбран.")
     
     async def _handle_cwl_bonus(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
                                data_parts: list):
@@ -279,6 +330,18 @@ class CallbackHandler:
         
         year_month = data_parts[1]
         await self.message_generator.display_cwl_bonus_info(update, context, year_month)
+    
+    async def _handle_members_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка просмотра участников клана"""
+        # Получаем тег клана из контекста
+        clan_tag = context.user_data.get('inspecting_clan')
+        if clan_tag:
+            # Отображаем первую страницу участников с сортировкой по роли по умолчанию
+            await self.message_generator.display_members_page(
+                update, context, clan_tag, page=1, sort_type="role", view_type="compact"
+            )
+        else:
+            await update.callback_query.edit_message_text("Ошибка: клан не выбран.")
     
     async def _handle_current_war(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка текущей войны"""
