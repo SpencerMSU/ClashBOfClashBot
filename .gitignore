@@ -39,6 +39,10 @@ ENV/
 *.db
 clashbot.db
 
+# Test files
+test_*.py
+demo_*.py
+
 # Logs
 *.log
 logs/

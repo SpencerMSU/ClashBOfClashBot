@@ -12,6 +12,7 @@ from database import DatabaseService
 from coc_api import CocApiClient, format_clan_tag, format_player_tag
 from keyboards import Keyboards, WarSort, MemberSort, MemberView
 from models.user import User
+from payment_service import YooKassaService
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ class MessageGenerator:
     def __init__(self, db_service: DatabaseService, coc_client: CocApiClient):
         self.db_service = db_service
         self.coc_client = coc_client
+        self.payment_service = YooKassaService()
         
         # Константы для форматирования
         self.MEMBERS_PER_PAGE = 10
@@ -458,3 +460,196 @@ class MessageGenerator:
             return [war for war in wars if war['is_cwl_war']]
         else:
             return wars  # RECENT - уже отсортированы по дате
+    
+    async def handle_subscription_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка меню подписки"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Получаем текущую подписку пользователя
+            subscription = await self.db_service.get_subscription(chat_id)
+            
+            if subscription and subscription.is_active and not subscription.is_expired():
+                # У пользователя есть активная подписка
+                message = (
+                    f"💎 <b>Ваша подписка</b>\n\n"
+                    f"📅 Тип: {self.payment_service.get_subscription_name(subscription.subscription_type)}\n"
+                    f"⏰ Действует до: {subscription.end_date.strftime('%d.%m.%Y %H:%M')}\n"
+                    f"📊 Дней осталось: {subscription.days_remaining()}\n\n"
+                    f"Хотите продлить подписку?"
+                )
+                keyboard = Keyboards.subscription_status()
+            else:
+                # У пользователя нет активной подписки
+                message = (
+                    f"💎 <b>Подписка</b>\n\n"
+                    f"Выберите период подписки:\n\n"
+                    f"✨ <b>Преимущества подписки:</b>\n"
+                    f"• 🚀 Приоритетная поддержка\n"
+                    f"• 📊 Расширенная статистика\n"
+                    f"• 🔔 Персональные уведомления\n"
+                    f"• 🎯 Эксклюзивные функции\n\n"
+                    f"Выберите подходящий период:"
+                )
+                keyboard = Keyboards.subscription_periods()
+            
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(
+                    message, 
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
+            else:
+                await update.message.reply_text(
+                    message, 
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при обработке меню подписки: {e}")
+            error_message = "Произошла ошибка при загрузке информации о подписке."
+            
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(error_message)
+            else:
+                await update.message.reply_text(error_message)
+    
+    async def handle_subscription_period_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                                  subscription_type: str):
+        """Обработка выбора периода подписки"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Создаем платеж в YooKassa
+            payment_data = await self.payment_service.create_payment(
+                telegram_id=chat_id,
+                subscription_type=subscription_type,
+                return_url=f"https://t.me/your_bot?start=payment_success"
+            )
+            
+            if payment_data and 'confirmation' in payment_data:
+                # Сохраняем ID платежа в контексте пользователя
+                context.user_data['pending_payment'] = {
+                    'payment_id': payment_data['id'],
+                    'subscription_type': subscription_type,
+                    'amount': payment_data['amount']['value']
+                }
+                
+                subscription_name = self.payment_service.get_subscription_name(subscription_type)
+                price = self.payment_service.get_subscription_price(subscription_type)
+                
+                message = (
+                    f"💳 <b>Оплата подписки</b>\n\n"
+                    f"📦 Подписка: {subscription_name}\n"
+                    f"💰 Сумма: {price:.0f} ₽\n\n"
+                    f"Нажмите кнопку ниже для перехода к оплате.\n"
+                    f"После успешной оплаты ваша подписка будет активирована автоматически."
+                )
+                
+                keyboard = Keyboards.subscription_payment(payment_data['confirmation']['confirmation_url'])
+                
+                await update.callback_query.edit_message_text(
+                    message,
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
+                
+                # Запускаем проверку статуса платежа
+                await self._schedule_payment_check(context, payment_data['id'], chat_id, subscription_type)
+            
+            else:
+                await update.callback_query.edit_message_text(
+                    "❌ Ошибка при создании платежа. Попробуйте позже.",
+                    reply_markup=Keyboards.back_to_main()
+                )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при создании платежа: {e}")
+            await update.callback_query.edit_message_text(
+                "❌ Произошла ошибка при создании платежа. Попробуйте позже.",
+                reply_markup=Keyboards.back_to_main()
+            )
+    
+    async def _schedule_payment_check(self, context: ContextTypes.DEFAULT_TYPE, payment_id: str, 
+                                     chat_id: int, subscription_type: str):
+        """Планирование проверки статуса платежа"""
+        # В реальном боте здесь был бы более сложный механизм проверки
+        # Для простоты используем базовую логику
+        import asyncio
+        
+        async def check_payment():
+            for _ in range(30):  # Проверяем 5 минут с интервалом 10 секунд
+                await asyncio.sleep(10)
+                
+                payment_status = await self.payment_service.check_payment_status(payment_id)
+                if payment_status and payment_status.get('status') == 'succeeded':
+                    await self._process_successful_payment(chat_id, subscription_type, payment_id, payment_status)
+                    break
+        
+        # Запускаем проверку в фоне (в реальном боте используйте job_queue)
+        asyncio.create_task(check_payment())
+    
+    async def _process_successful_payment(self, telegram_id: int, subscription_type: str, 
+                                        payment_id: str, payment_data: Dict):
+        """Обработка успешного платежа"""
+        try:
+            from datetime import datetime, timedelta
+            from models.subscription import Subscription
+            
+            # Получаем длительность подписки
+            duration = self.payment_service.get_subscription_duration(subscription_type)
+            amount = float(payment_data['amount']['value'])
+            
+            # Проверяем существующую подписку
+            existing_subscription = await self.db_service.get_subscription(telegram_id)
+            
+            if existing_subscription and existing_subscription.is_active and not existing_subscription.is_expired():
+                # Продляем существующую подписку
+                new_end_date = existing_subscription.end_date + duration
+                existing_subscription.end_date = new_end_date
+                existing_subscription.payment_id = payment_id
+                existing_subscription.amount = amount
+                
+                success = await self.db_service.save_subscription(existing_subscription)
+                message = (
+                    f"✅ <b>Подписка продлена!</b>\n\n"
+                    f"📅 Новая дата окончания: {new_end_date.strftime('%d.%m.%Y %H:%M')}\n"
+                    f"💳 Сумма платежа: {amount:.0f} ₽"
+                )
+            else:
+                # Создаем новую подписку
+                start_date = datetime.now()
+                end_date = start_date + duration
+                
+                new_subscription = Subscription(
+                    telegram_id=telegram_id,
+                    subscription_type=subscription_type,
+                    start_date=start_date,
+                    end_date=end_date,
+                    is_active=True,
+                    payment_id=payment_id,
+                    amount=amount
+                )
+                
+                success = await self.db_service.save_subscription(new_subscription)
+                message = (
+                    f"✅ <b>Подписка активирована!</b>\n\n"
+                    f"📅 Действует до: {end_date.strftime('%d.%m.%Y %H:%M')}\n"
+                    f"💳 Сумма платежа: {amount:.0f} ₽"
+                )
+            
+            if success:
+                # Отправляем уведомление пользователю (нужен доступ к боту)
+                logger.info(f"Подписка успешно обработана для пользователя {telegram_id}")
+                # В реальном боте здесь отправляется сообщение пользователю
+            else:
+                logger.error(f"Ошибка при сохранении подписки для пользователя {telegram_id}")
+        
+        except Exception as e:
+            logger.error(f"Ошибка при обработке успешного платежа: {e}")
+    
+    async def close(self):
+        """Закрытие ресурсов"""
+        if self.payment_service:
+            await self.payment_service.close()
