@@ -25,7 +25,7 @@ class Keyboards:
     CLAN_CWL_BONUS_BTN = "🏆 Бонусы ЛВК"
     NOTIFICATIONS_BTN = "🔔 Уведомления о КВ"
     CLAN_CURRENT_WAR_BTN = "⚔️ Текущая КВ"
-    SUBSCRIPTION_BTN = "💎 Подписка"
+    SUBSCRIPTION_BTN = "💎 Премиум подписка"
     
     # Константы для callback-данных
     MEMBERS_CALLBACK = "members"
@@ -56,9 +56,11 @@ class Keyboards:
         
         if player_name:
             keyboard.append([KeyboardButton(f"{Keyboards.MY_PROFILE_PREFIX} ({player_name})")])
-            keyboard.append([KeyboardButton(Keyboards.SUBSCRIPTION_BTN)])
         else:
             keyboard.append([KeyboardButton(Keyboards.LINK_ACC_BTN)])
+        
+        # Всегда добавляем кнопку подписки, чтобы она была видна всем пользователям
+        keyboard.append([KeyboardButton(Keyboards.SUBSCRIPTION_BTN)])
         
         keyboard.extend([
             [KeyboardButton(Keyboards.SEARCH_PROFILE_BTN)],
@@ -214,15 +216,15 @@ class Keyboards:
     
     @staticmethod
     def subscription_periods() -> InlineKeyboardMarkup:
-        """Клавиатура выбора периода подписки"""
+        """Клавиатура выбора периода премиум подписки"""
         keyboard = [
-            [InlineKeyboardButton("1 месяц - 299₽", 
+            [InlineKeyboardButton("💎 1 месяц - 299₽", 
                                 callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:1month")],
-            [InlineKeyboardButton("3 месяца - 799₽", 
+            [InlineKeyboardButton("💎 3 месяца - 799₽", 
                                 callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:3months")],
-            [InlineKeyboardButton("6 месяцев - 1499₽", 
+            [InlineKeyboardButton("💎 6 месяцев - 1499₽", 
                                 callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:6months")],
-            [InlineKeyboardButton("1 год - 2799₽", 
+            [InlineKeyboardButton("💎 1 год - 2799₽", 
                                 callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:1year")]
         ]
         return InlineKeyboardMarkup(keyboard)
@@ -238,9 +240,9 @@ class Keyboards:
     
     @staticmethod
     def subscription_status() -> InlineKeyboardMarkup:
-        """Клавиатура управления подпиской"""
+        """Клавиатура управления премиум подпиской"""
         keyboard = [
-            [InlineKeyboardButton("💎 Продлить подписку", 
+            [InlineKeyboardButton("💎 Продлить премиум", 
                                 callback_data=Keyboards.SUBSCRIPTION_CALLBACK)],
             [InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")]
         ]
