@@ -1,6 +1,7 @@
 """
 Основной класс бота - аналог Java ClashBot
 """
+import asyncio
 import logging
 from typing import Dict, Any
 from telegram import Bot
@@ -40,20 +41,39 @@ class ClashBot:
     
     async def initialize(self):
         """Инициализация бота"""
+        await self._init_components()
+        
+        # Создание приложения бота
+        self.application = Application.builder().token(self.token).build()
+        self.bot_instance = self.application.bot
+        
+        # Регистрация обработчиков
+        self._register_handlers()
+        
+        logger.info("Бот успешно инициализирован")
+    
+    async def _init_components(self):
+        """Инициализация компонентов бота"""
         try:
             # Инициализация базы данных
             await self.db_service.init_db()
             
-            # Создание приложения бота
-            self.application = Application.builder().token(self.token).build()
-            self.bot_instance = self.application.bot
+            # Создание приложения бота для проверки токена
+            temp_app = Application.builder().token(self.token).build()
             
-            # Проверяем валидность токена перед запуском
+            # Проверяем валидность токена перед продолжением
             try:
-                await self.bot_instance.get_me()
+                await temp_app.bot.get_me()
             except Exception as e:
                 logger.error(f"Неверный токен бота или проблемы с сетью: {e}")
                 raise ValueError(f"Не удается подключиться к Telegram API: {e}")
+            finally:
+                # Очищаем временное приложение
+                await temp_app.shutdown()
+            
+            # Создание основного приложения бота
+            self.application = Application.builder().token(self.token).build()
+            self.bot_instance = self.application.bot
             
             # Регистрация обработчиков
             self._register_handlers()
@@ -61,10 +81,10 @@ class ClashBot:
             # Запуск архиватора войн
             await self._start_war_archiver()
             
-            logger.info("Бот успешно инициализирован")
+            logger.info("Компоненты бота успешно инициализированы")
             
         except Exception as e:
-            logger.error(f"Ошибка при инициализации бота: {e}")
+            logger.error(f"Ошибка при инициализации компонентов бота: {e}")
             raise
     
     def _register_handlers(self):
@@ -114,25 +134,37 @@ class ClashBot:
     async def run(self):
         """Запуск бота"""
         try:
-            await self.initialize()
+            # Initialize components first to catch configuration errors early
+            await self._init_components()
+            
+            # Initialize the telegram application
+            await self.application.initialize()
+            
+            # Start the application
+            await self.application.start()
             
             logger.info("Запуск бота...")
-            await self.application.run_polling(
+            # Start polling with proper lifecycle management
+            await self.application.updater.start_polling(
                 allowed_updates=['message', 'callback_query'],
                 drop_pending_updates=True
             )
             
-        except KeyboardInterrupt:
-            logger.info("Получен сигнал завершения")
-            await self.shutdown()
+            # Keep the bot running until interrupted
+            try:
+                # This will run indefinitely until stopped
+                await asyncio.Event().wait()
+            except KeyboardInterrupt:
+                logger.info("Получен сигнал завершения")
+                
         except ValueError as e:
-            # Validation errors (like invalid token) - don't try to clean up application
+            # Validation errors (like invalid token) - don't initialize application
             logger.error(f"Ошибка конфигурации: {e}")
-            await self._shutdown_external_components()
         except Exception as e:
             logger.error(f"Ошибка при работе бота: {e}")
-            # For other errors, try graceful shutdown
-            await self.shutdown()
+        finally:
+            # Always ensure proper cleanup
+            await self._cleanup()
     
     async def _shutdown_external_components(self):
         """Завершение работы внешних компонентов (не управляемых application)"""
@@ -156,22 +188,35 @@ class ClashBot:
         except Exception as e:
             logger.error(f"Ошибка при завершении работы внешних компонентов: {e}")
 
-    async def shutdown(self):
-        """Завершение работы бота"""
+    async def _cleanup(self):
+        """Безопасная очистка ресурсов"""
         try:
             logger.info("Завершение работы бота...")
             
             # Сначала завершаем внешние компоненты
             await self._shutdown_external_components()
             
-            # Остановка приложения
+            # Останавливаем Telegram приложение если оно запущено
             if self.application:
-                await self.application.shutdown()
+                try:
+                    if hasattr(self.application, 'updater') and self.application.updater.running:
+                        await self.application.updater.stop()
+                    
+                    if self.application.running:
+                        await self.application.stop()
+                    
+                    await self.application.shutdown()
+                except Exception as e:
+                    logger.error(f"Ошибка при остановке приложения: {e}")
             
             logger.info("Бот успешно завершил работу")
             
         except Exception as e:
             logger.error(f"Ошибка при завершении работы бота: {e}")
+
+    async def shutdown(self):
+        """Завершение работы бота (для обратной совместимости)"""
+        await self._cleanup()
     
     async def send_message(self, chat_id: int, text: str, reply_markup=None, parse_mode=None):
         """Отправка сообщения"""
