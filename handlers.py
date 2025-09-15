@@ -105,6 +105,9 @@ class MessageHandler:
             elif text == Keyboards.NOTIFICATIONS_BTN:
                 await self.message_generator.handle_notifications_menu(update, context)
             
+            elif text == Keyboards.SUBSCRIPTION_BTN:
+                await self.message_generator.handle_subscription_menu(update, context)
+            
             elif text == Keyboards.BACK_BTN or text == Keyboards.BACK_TO_CLAN_MENU_BTN:
                 await update.message.reply_text("Главное меню:", 
                                                reply_markup=Keyboards.main_menu())
@@ -184,6 +187,12 @@ class CallbackHandler:
             
             elif callback_type == "cwl_info":
                 await self._handle_cwl_info(update, context)
+            
+            elif callback_type == Keyboards.SUBSCRIPTION_CALLBACK:
+                await self._handle_subscription_menu(update, context)
+            
+            elif callback_type == Keyboards.SUBSCRIPTION_PERIOD_CALLBACK:
+                await self._handle_subscription_period(update, context, data_parts)
             
             elif callback_type == "main_menu":
                 await query.edit_message_text("Главное меню:")
@@ -288,3 +297,18 @@ class CallbackHandler:
             await self.message_generator.display_cwl_info(update, context, clan_tag)
         else:
             await update.callback_query.edit_message_text("Ошибка: клан не выбран.")
+    
+    async def _handle_subscription_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка меню подписки"""
+        await self.message_generator.handle_subscription_menu(update, context)
+    
+    async def _handle_subscription_period(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                         data_parts: list):
+        """Обработка выбора периода подписки"""
+        if len(data_parts) < 2:
+            return
+        
+        subscription_type = data_parts[1]
+        await self.message_generator.handle_subscription_period_selection(
+            update, context, subscription_type
+        )

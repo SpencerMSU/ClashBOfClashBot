@@ -25,6 +25,7 @@ class Keyboards:
     CLAN_CWL_BONUS_BTN = "🏆 Бонусы ЛВК"
     NOTIFICATIONS_BTN = "🔔 Уведомления о КВ"
     CLAN_CURRENT_WAR_BTN = "⚔️ Текущая КВ"
+    SUBSCRIPTION_BTN = "💎 Подписка"
     
     # Константы для callback-данных
     MEMBERS_CALLBACK = "members"
@@ -35,6 +36,9 @@ class Keyboards:
     CWL_BONUS_CALLBACK = "cwlbonus"
     MEMBERS_SORT_CALLBACK = "members_sort"
     MEMBERS_VIEW_CALLBACK = "members_view"
+    SUBSCRIPTION_CALLBACK = "subscription"
+    SUBSCRIPTION_PERIOD_CALLBACK = "sub_period"
+    SUBSCRIPTION_PAY_CALLBACK = "sub_pay"
     
     @staticmethod
     def main_menu() -> ReplyKeyboardMarkup:
@@ -52,6 +56,7 @@ class Keyboards:
         
         if player_name:
             keyboard.append([KeyboardButton(f"{Keyboards.MY_PROFILE_PREFIX} ({player_name})")])
+            keyboard.append([KeyboardButton(Keyboards.SUBSCRIPTION_BTN)])
         else:
             keyboard.append([KeyboardButton(Keyboards.LINK_ACC_BTN)])
         
@@ -203,6 +208,40 @@ class Keyboards:
     def back_to_main() -> InlineKeyboardMarkup:
         """Кнопка возврата в главное меню"""
         keyboard = [
+            [InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def subscription_periods() -> InlineKeyboardMarkup:
+        """Клавиатура выбора периода подписки"""
+        keyboard = [
+            [InlineKeyboardButton("1 месяц - 299₽", 
+                                callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:1month")],
+            [InlineKeyboardButton("3 месяца - 799₽", 
+                                callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:3months")],
+            [InlineKeyboardButton("6 месяцев - 1499₽", 
+                                callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:6months")],
+            [InlineKeyboardButton("1 год - 2799₽", 
+                                callback_data=f"{Keyboards.SUBSCRIPTION_PERIOD_CALLBACK}:1year")]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def subscription_payment(payment_url: str) -> InlineKeyboardMarkup:
+        """Клавиатура оплаты подписки"""
+        keyboard = [
+            [InlineKeyboardButton("💳 Оплатить", url=payment_url)],
+            [InlineKeyboardButton("❌ Отменить", callback_data="main_menu")]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def subscription_status() -> InlineKeyboardMarkup:
+        """Клавиатура управления подпиской"""
+        keyboard = [
+            [InlineKeyboardButton("💎 Продлить подписку", 
+                                callback_data=Keyboards.SUBSCRIPTION_CALLBACK)],
             [InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")]
         ]
         return InlineKeyboardMarkup(keyboard)

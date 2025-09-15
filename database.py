@@ -4,11 +4,12 @@
 import aiosqlite
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 
 from models.user import User
 from models.war import WarToSave, AttackData
+from models.subscription import Subscription
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,22 @@ class DatabaseService:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS notifications (
                     telegram_id INTEGER PRIMARY KEY
+                )
+            """)
+            
+            # Создание таблицы подписок
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    telegram_id INTEGER PRIMARY KEY,
+                    subscription_type TEXT NOT NULL,
+                    start_date TEXT NOT NULL,
+                    end_date TEXT NOT NULL,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    payment_id TEXT,
+                    amount REAL,
+                    currency TEXT DEFAULT 'RUB',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 )
             """)
             
@@ -304,3 +321,109 @@ class DatabaseService:
             }
             
             return war_data
+    
+    async def save_subscription(self, subscription: Subscription) -> bool:
+        """Сохранение подписки"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                now = datetime.now().isoformat()
+                await db.execute("""
+                    INSERT OR REPLACE INTO subscriptions 
+                    (telegram_id, subscription_type, start_date, end_date, is_active, 
+                     payment_id, amount, currency, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    subscription.telegram_id,
+                    subscription.subscription_type,
+                    subscription.start_date.isoformat(),
+                    subscription.end_date.isoformat(),
+                    1 if subscription.is_active else 0,
+                    subscription.payment_id,
+                    subscription.amount,
+                    subscription.currency,
+                    now,
+                    now
+                ))
+                await db.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении подписки: {e}")
+            return False
+    
+    async def get_subscription(self, telegram_id: int) -> Optional[Subscription]:
+        """Получение подписки пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("""
+                SELECT telegram_id, subscription_type, start_date, end_date, is_active,
+                       payment_id, amount, currency
+                FROM subscriptions 
+                WHERE telegram_id = ?
+            """, (telegram_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return Subscription(
+                        telegram_id=row[0],
+                        subscription_type=row[1],
+                        start_date=datetime.fromisoformat(row[2]),
+                        end_date=datetime.fromisoformat(row[3]),
+                        is_active=bool(row[4]),
+                        payment_id=row[5],
+                        amount=row[6],
+                        currency=row[7] or "RUB"
+                    )
+                return None
+    
+    async def extend_subscription(self, telegram_id: int, additional_days: int) -> bool:
+        """Продление подписки"""
+        try:
+            subscription = await self.get_subscription(telegram_id)
+            if subscription:
+                # Продляем существующую подписку
+                new_end_date = subscription.end_date + timedelta(days=additional_days)
+                subscription.end_date = new_end_date
+                subscription.is_active = True
+                return await self.save_subscription(subscription)
+            return False
+        except Exception as e:
+            logger.error(f"Ошибка при продлении подписки: {e}")
+            return False
+    
+    async def deactivate_subscription(self, telegram_id: int) -> bool:
+        """Деактивация подписки"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("""
+                    UPDATE subscriptions 
+                    SET is_active = 0, updated_at = ?
+                    WHERE telegram_id = ?
+                """, (datetime.now().isoformat(), telegram_id))
+                await db.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при деактивации подписки: {e}")
+            return False
+    
+    async def get_expired_subscriptions(self) -> List[Subscription]:
+        """Получение истекших подписок"""
+        async with aiosqlite.connect(self.db_path) as db:
+            current_time = datetime.now().isoformat()
+            async with db.execute("""
+                SELECT telegram_id, subscription_type, start_date, end_date, is_active,
+                       payment_id, amount, currency
+                FROM subscriptions 
+                WHERE is_active = 1 AND end_date < ?
+            """, (current_time,)) as cursor:
+                rows = await cursor.fetchall()
+                return [
+                    Subscription(
+                        telegram_id=row[0],
+                        subscription_type=row[1],
+                        start_date=datetime.fromisoformat(row[2]),
+                        end_date=datetime.fromisoformat(row[3]),
+                        is_active=bool(row[4]),
+                        payment_id=row[5],
+                        amount=row[6],
+                        currency=row[7] or "RUB"
+                    )
+                    for row in rows
+                ]

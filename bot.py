@@ -135,6 +135,10 @@ class ClashBot:
             if hasattr(self.coc_client, 'close'):
                 await self.coc_client.close()
             
+            # Закрытие сервиса платежей
+            if hasattr(self.message_generator, 'close'):
+                await self.message_generator.close()
+            
             # Остановка приложения
             if self.application:
                 await self.application.shutdown()
