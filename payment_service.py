@@ -58,8 +58,9 @@ class YooKassaService:
         "1year": "Премиум подписка на 1 год"
     }
     
-    def __init__(self):
+    def __init__(self, bot_username: str = None):
         self.session = None
+        self.bot_username = bot_username or "YourBotUsername"
     
     async def _get_session(self):
         """Получение HTTP сессии"""
@@ -103,7 +104,7 @@ class YooKassaService:
                 },
                 "confirmation": {
                     "type": "redirect",
-                    "return_url": return_url or "https://t.me/your_bot"
+                    "return_url": return_url or f"https://t.me/{self.bot_username}"
                 },
                 "capture": True,
                 "description": description,
@@ -155,13 +156,26 @@ class YooKassaService:
     
     def get_subscription_duration(self, subscription_type: str) -> timedelta:
         """Получение длительности подписки"""
-        durations = {
-            "1month": timedelta(days=30),
-            "3months": timedelta(days=90),
-            "6months": timedelta(days=180),
-            "1year": timedelta(days=365)
-        }
-        return durations.get(subscription_type, timedelta(days=30))
+        # Извлекаем период из типа подписки
+        if 'permanent' in subscription_type:
+            return timedelta(days=36500)  # 100 лет для вечной подписки
+        elif '1month' in subscription_type:
+            return timedelta(days=30)
+        elif '3months' in subscription_type:
+            return timedelta(days=90)
+        elif '6months' in subscription_type:
+            return timedelta(days=180)
+        elif '1year' in subscription_type:
+            return timedelta(days=365)
+        else:
+            # Fallback для legacy форматов
+            durations = {
+                "1month": timedelta(days=30),
+                "3months": timedelta(days=90),
+                "6months": timedelta(days=180),
+                "1year": timedelta(days=365)
+            }
+            return durations.get(subscription_type, timedelta(days=30))
     
     def get_subscription_price(self, subscription_type: str) -> float:
         """Получение цены подписки"""

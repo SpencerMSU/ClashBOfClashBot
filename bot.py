@@ -6,6 +6,7 @@ import logging
 from typing import Dict, Any
 from telegram import Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram.constants import ParseMode
 
 from config import config
 from database import DatabaseService
@@ -112,6 +113,13 @@ class ClashBot:
     
     async def _start_command(self, update, context):
         """Обработчик команды /start"""
+        # Проверяем, есть ли параметр команды (например, payment_success)
+        if context.args:
+            command_arg = context.args[0]
+            if command_arg.startswith('payment_success'):
+                await self._handle_payment_success(update, context, command_arg)
+                return
+        
         await update.message.reply_text(
             "🎮 Добро пожаловать в бота для Clash of Clans!\n\n"
             "Этот бот поможет вам:\n"
@@ -122,6 +130,40 @@ class ClashBot:
             "Выберите действие в меню ниже:",
             reply_markup=Keyboards.main_menu()
         )
+    
+    async def _handle_payment_success(self, update, context, command_arg):
+        """Обработка успешного платежа"""
+        chat_id = update.effective_chat.id
+        
+        # Извлекаем тип подписки из параметра
+        subscription_type = command_arg.replace('payment_success_', '') if '_' in command_arg else None
+        
+        # Получаем информацию о подписке пользователя
+        subscription = await self.db_service.get_subscription(chat_id)
+        
+        if subscription and subscription.is_active and not subscription.is_expired():
+            subscription_name = self.message_generator.payment_service.get_subscription_name(subscription.subscription_type)
+            end_date = subscription.end_date.strftime('%d.%m.%Y %H:%M')
+            
+            success_message = (
+                f"✅ <b>Платеж успешно обработан!</b>\n\n"
+                f"🎉 Подписка <b>{subscription_name}</b> активирована\n"
+                f"📅 Действует до: {end_date}\n"
+                f"💰 Сумма: {subscription.amount:.0f} ₽\n\n"
+                f"Спасибо за покупку! Теперь вам доступны все премиум функции."
+            )
+            
+            await update.message.reply_text(
+                success_message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=Keyboards.main_menu()
+            )
+        else:
+            await update.message.reply_text(
+                "❌ Не удалось найти активную подписку.\n"
+                "Если платеж был произведен, подписка будет активирована в течение нескольких минут.",
+                reply_markup=Keyboards.main_menu()
+            )
     
     async def _start_war_archiver(self):
         """Запуск архиватора войн"""

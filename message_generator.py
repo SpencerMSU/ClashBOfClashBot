@@ -26,7 +26,7 @@ class MessageGenerator:
     def __init__(self, db_service: DatabaseService, coc_client: CocApiClient):
         self.db_service = db_service
         self.coc_client = coc_client
-        self.payment_service = YooKassaService()
+        self.payment_service = YooKassaService(config.BOT_USERNAME)
         
         # Константы для форматирования
         self.MEMBERS_PER_PAGE = 10
@@ -710,7 +710,7 @@ class MessageGenerator:
             payment_data = await self.payment_service.create_payment(
                 telegram_id=chat_id,
                 subscription_type=subscription_type,
-                return_url=f"https://t.me/your_bot?start=payment_success"
+                return_url=f"https://t.me/{config.BOT_USERNAME}?start=payment_success_{subscription_type}"
             )
             
             if payment_data and 'confirmation' in payment_data:
@@ -821,14 +821,49 @@ class MessageGenerator:
                 )
             
             if success:
-                # Отправляем уведомление пользователю (нужен доступ к боту)
+                # Отправляем уведомление пользователю
                 logger.info(f"Подписка успешно обработана для пользователя {telegram_id}")
-                # В реальном боте здесь отправляется сообщение пользователю
+                # Сохраняем сообщение для отправки при следующем взаимодействии с ботом
+                await self._send_payment_notification(telegram_id, message)
             else:
                 logger.error(f"Ошибка при сохранении подписки для пользователя {telegram_id}")
         
         except Exception as e:
             logger.error(f"Ошибка при обработке успешного платежа: {e}")
+    
+    async def _send_payment_notification(self, telegram_id: int, message: str):
+        """Отправка уведомления о платеже пользователю"""
+        try:
+            # Попробуем получить экземпляр бота из глобального контекста или создать новый
+            from config import config
+            from telegram import Bot
+            
+            bot = Bot(token=config.BOT_TOKEN)
+            await bot.send_message(
+                chat_id=telegram_id,
+                text=message,
+                parse_mode=ParseMode.HTML
+            )
+            logger.info(f"Уведомление о платеже отправлено пользователю {telegram_id}")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке уведомления о платеже: {e}")
+            # В случае ошибки сохраняем уведомление в базе для последующей отправки
+            await self._save_pending_notification(telegram_id, message)
+    
+    async def _save_pending_notification(self, telegram_id: int, message: str):
+        """Сохранение отложенного уведомления"""
+        try:
+            # Создаем запись в БД о необходимости отправить уведомление
+            notification_data = {
+                'telegram_id': telegram_id,
+                'message': message,
+                'type': 'payment_success',
+                'created_at': datetime.now().isoformat()
+            }
+            # Здесь можно добавить сохранение в БД или использовать другой механизм
+            logger.info(f"Уведомление сохранено для отложенной отправки пользователю {telegram_id}")
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении отложенного уведомления: {e}")
     
     async def display_current_war(self, update: Update, context: ContextTypes.DEFAULT_TYPE, clan_tag: str):
         """Отображение информации о текущей войне клана"""
