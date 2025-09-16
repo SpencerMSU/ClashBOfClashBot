@@ -26,8 +26,8 @@ class BuildingMonitor:
         self.is_running = False
         self.task = None
         
-        # Интервал проверки - каждые 5 минут
-        self.check_interval = 300  # 5 минут в секундах
+        # Интервал проверки - каждые 3 минуты
+        self.check_interval = 180  # 3 минуты в секундах
         
         # Словарь для перевода названий зданий на русский
         self.building_names_ru = {
