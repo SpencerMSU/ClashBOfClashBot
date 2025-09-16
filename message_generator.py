@@ -13,6 +13,8 @@ from database import DatabaseService
 from coc_api import CocApiClient, format_clan_tag, format_player_tag
 from keyboards import Keyboards, WarSort, MemberSort, MemberView
 from models.user import User
+from models.user_profile import UserProfile
+from user_state import UserState
 from models.subscription import Subscription
 from payment_service import YooKassaService
 from config import config
@@ -44,6 +46,36 @@ class MessageGenerator:
         chat_id = update.effective_chat.id
         
         try:
+            # Проверяем подписку пользователя
+            subscription = await self.db_service.get_subscription(chat_id)
+            has_premium = subscription and subscription.is_active and not subscription.is_expired()
+            
+            if has_premium:
+                # Для премиум пользователей проверяем профили
+                profiles = await self.db_service.get_user_profiles(chat_id)
+                profile_count = len(profiles)
+                
+                if profile_count > 1:
+                    # Показываем менеджер профилей
+                    await update.message.reply_text(
+                        "Меню профиля:",
+                        reply_markup=Keyboards.profile_menu(None, has_premium=True, profile_count=profile_count)
+                    )
+                    return
+                elif profile_count == 1:
+                    # Показываем единственный профиль
+                    primary_profile = profiles[0]
+                    async with self.coc_client as client:
+                        player_data = await client.get_player_info(primary_profile.player_tag)
+                        player_name = player_data.get('name') if player_data else None
+                        
+                        await update.message.reply_text(
+                            "Меню профиля:",
+                            reply_markup=Keyboards.profile_menu(player_name, has_premium=True, profile_count=1)
+                        )
+                    return
+            
+            # Для обычных пользователей или премиум без профилей
             user = await self.db_service.find_user(chat_id)
             if user:
                 async with self.coc_client as client:
@@ -52,18 +84,18 @@ class MessageGenerator:
                     
                     await update.message.reply_text(
                         "Меню профиля:",
-                        reply_markup=Keyboards.profile_menu(player_name)
+                        reply_markup=Keyboards.profile_menu(player_name, has_premium=has_premium, profile_count=0)
                     )
             else:
                 await update.message.reply_text(
                     "Меню профиля:",
-                    reply_markup=Keyboards.profile_menu(None)
+                    reply_markup=Keyboards.profile_menu(None, has_premium=has_premium, profile_count=0)
                 )
         except Exception as e:
             logger.error(f"Ошибка при получении меню профиля: {e}")
             await update.message.reply_text(
                 "Меню профиля:",
-                reply_markup=Keyboards.profile_menu(None)
+                reply_markup=Keyboards.profile_menu(None, has_premium=False, profile_count=0)
             )
     
     async def handle_my_profile_request(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1505,6 +1537,252 @@ class MessageGenerator:
         except Exception as e:
             logger.error(f"Ошибка при переключении отслеживания зданий: {e}")
             await update.callback_query.edit_message_text("Произошла ошибка при изменении настроек отслеживания.")
+
+    async def handle_profile_manager_request(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка запроса менеджера профилей"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Проверяем подписку
+            subscription = await self.db_service.get_subscription(chat_id)
+            if not subscription or not subscription.is_active or subscription.is_expired():
+                await update.message.reply_text("❌ Функция доступна только для премиум пользователей.")
+                return
+            
+            # Получаем максимальное количество профилей для подписки
+            max_profiles = Keyboards.get_subscription_max_profiles(subscription.subscription_type)
+            
+            # Получаем профили пользователя
+            profiles = await self.db_service.get_user_profiles(chat_id)
+            profile_data = []
+            
+            for profile in profiles:
+                async with self.coc_client as client:
+                    player_data = await client.get_player_info(profile.player_tag)
+                    profile_info = {
+                        'player_tag': profile.player_tag,
+                        'profile_name': profile.profile_name or f"Профиль {len(profile_data) + 1}",
+                        'player_name': player_data.get('name', 'Неизвестно') if player_data else 'Неизвестно',
+                        'is_primary': profile.is_primary
+                    }
+                    profile_data.append(profile_info)
+            
+            message = f"👥 *Менеджер профилей*\n\n"
+            message += f"📊 Профилей: {len(profiles)}/{max_profiles}\n"
+            if profiles:
+                message += "⭐ - основной профиль\n\n"
+                message += "Выберите профиль для просмотра или управления:"
+            else:
+                message += "\nУ вас пока нет привязанных профилей.\nНажмите \"➕ Добавить профиль\" для добавления."
+            
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(
+                    message,
+                    reply_markup=Keyboards.profile_manager_menu(profile_data, max_profiles),
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await update.message.reply_text(
+                    message,
+                    reply_markup=Keyboards.profile_manager_menu(profile_data, max_profiles),
+                    parse_mode=ParseMode.MARKDOWN
+                )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при получении менеджера профилей: {e}")
+            await update.message.reply_text("Произошла ошибка при загрузке менеджера профилей.")
+
+    async def display_profile_from_manager(self, update: Update, context: ContextTypes.DEFAULT_TYPE, player_tag: str):
+        """Отображение профиля из менеджера"""
+        try:
+            back_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Назад к менеджеру профилей", 
+                                    callback_data=Keyboards.PROFILE_MANAGER_CALLBACK)],
+                [InlineKeyboardButton("⭐ Сделать основным", 
+                                    callback_data=f"set_primary:{player_tag}")]
+            ])
+            
+            await self.display_player_info(
+                update, context, player_tag, back_keyboard=back_keyboard, from_callback=True
+            )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при отображении профиля из менеджера: {e}")
+            await update.callback_query.edit_message_text("Произошла ошибка при загрузке профиля.")
+
+    async def handle_profile_delete_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка меню удаления профиля"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            profiles = await self.db_service.get_user_profiles(chat_id)
+            if not profiles:
+                await update.callback_query.edit_message_text("У вас нет профилей для удаления.")
+                return
+            
+            profile_data = []
+            for profile in profiles:
+                async with self.coc_client as client:
+                    player_data = await client.get_player_info(profile.player_tag)
+                    profile_info = {
+                        'player_tag': profile.player_tag,
+                        'profile_name': profile.profile_name or f"Профиль {len(profile_data) + 1}",
+                        'player_name': player_data.get('name', 'Неизвестно') if player_data else 'Неизвестно'
+                    }
+                    profile_data.append(profile_info)
+            
+            message = "🗑️ *Удаление профиля*\n\n"
+            message += "⚠️ Выберите профиль для удаления.\n"
+            message += "Это действие нельзя отменить!"
+            
+            await update.callback_query.edit_message_text(
+                message,
+                reply_markup=Keyboards.profile_delete_menu(profile_data),
+                parse_mode=ParseMode.MARKDOWN
+            )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при получении меню удаления: {e}")
+            await update.callback_query.edit_message_text("Произошла ошибка при загрузке меню удаления.")
+
+    async def handle_profile_delete_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE, player_tag: str):
+        """Обработка подтверждения удаления профиля"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Получаем информацию об игроке перед удалением
+            async with self.coc_client as client:
+                player_data = await client.get_player_info(player_tag)
+                player_name = player_data.get('name', 'Неизвестно') if player_data else 'Неизвестно'
+            
+            # Удаляем профиль
+            success = await self.db_service.delete_user_profile(chat_id, player_tag)
+            
+            if success:
+                message = f"✅ Профиль {player_name} ({player_tag}) успешно удален."
+            else:
+                message = "❌ Ошибка при удалении профиля."
+            
+            await update.callback_query.edit_message_text(message)
+            
+            # Возвращаемся к менеджеру профилей через 2 секунды
+            await asyncio.sleep(2)
+            await self.handle_profile_manager_request(update, context)
+        
+        except Exception as e:
+            logger.error(f"Ошибка при удалении профиля: {e}")
+            await update.callback_query.edit_message_text("Произошла ошибка при удалении профиля.")
+
+    async def handle_profile_add_request(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка запроса добавления нового профиля"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Проверяем подписку
+            subscription = await self.db_service.get_subscription(chat_id)
+            if not subscription or not subscription.is_active or subscription.is_expired():
+                await update.callback_query.edit_message_text("❌ Функция доступна только для премиум пользователей.")
+                return
+            
+            # Проверяем лимит профилей
+            max_profiles = Keyboards.get_subscription_max_profiles(subscription.subscription_type)
+            current_count = await self.db_service.get_user_profile_count(chat_id)
+            
+            if current_count >= max_profiles:
+                await update.callback_query.edit_message_text(
+                    f"❌ Достигнут максимальный лимит профилей ({max_profiles}).\n"
+                    "Удалите существующий профиль, чтобы добавить новый."
+                )
+                return
+            
+            # Устанавливаем состояние ожидания тега игрока
+            context.user_data['state'] = UserState.AWAITING_PLAYER_TAG_TO_ADD_PROFILE
+            
+            await update.callback_query.edit_message_text(
+                f"📝 *Добавление нового профиля*\n\n"
+                f"Отправьте тег игрока в Clash of Clans.\n"
+                f"Например: #ABC123DEF\n\n"
+                f"Профилей: {current_count}/{max_profiles}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при запросе добавления профиля: {e}")
+            await update.callback_query.edit_message_text("Произошла ошибка при обработке запроса.")
+
+    async def handle_add_profile_tag(self, update: Update, context: ContextTypes.DEFAULT_TYPE, player_tag: str):
+        """Обработка добавления профиля по тегу"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Проверяем подписку
+            subscription = await self.db_service.get_subscription(chat_id)
+            if not subscription or not subscription.is_active or subscription.is_expired():
+                await update.message.reply_text("❌ Функция доступна только для премиум пользователей.")
+                return
+            
+            # Проверяем лимит профилей
+            max_profiles = Keyboards.get_subscription_max_profiles(subscription.subscription_type)
+            current_count = await self.db_service.get_user_profile_count(chat_id)
+            
+            if current_count >= max_profiles:
+                await update.message.reply_text(
+                    f"❌ Достигнут максимальный лимит профилей ({max_profiles})."
+                )
+                return
+            
+            # Получаем информацию об игроке
+            async with self.coc_client as client:
+                player_data = await client.get_player_info(player_tag)
+                
+                if not player_data:
+                    await update.message.reply_text(
+                        "❌ Игрок с таким тегом не найден. Проверьте правильность тега."
+                    )
+                    return
+            
+            # Проверяем, не добавлен ли уже этот профиль
+            existing_profiles = await self.db_service.get_user_profiles(chat_id)
+            if any(p.player_tag == player_tag for p in existing_profiles):
+                await update.message.reply_text(
+                    f"❌ Профиль {player_data.get('name', 'игрока')} ({player_tag}) уже добавлен."
+                )
+                return
+            
+            # Создаем профиль
+            profile_name = f"Профиль {current_count + 1}"
+            is_primary = current_count == 0  # Первый профиль становится основным
+            
+            new_profile = UserProfile(
+                telegram_id=chat_id,
+                player_tag=player_tag,
+                profile_name=profile_name,
+                is_primary=is_primary
+            )
+            
+            success = await self.db_service.save_user_profile(new_profile)
+            
+            if success:
+                player_name = player_data.get('name', 'Неизвестно')
+                message = f"✅ Профиль успешно добавлен!\n\n"
+                message += f"👤 Игрок: {player_name}\n"
+                message += f"🏷 Тег: {player_tag}\n"
+                message += f"📝 Название: {profile_name}"
+                
+                if is_primary:
+                    message += "\n⭐ Установлен как основной профиль"
+                
+                await update.message.reply_text(message)
+                
+                # Возвращаемся к менеджеру профилей
+                await asyncio.sleep(2)
+                await self.handle_profile_manager_request(update, context)
+            else:
+                await update.message.reply_text("❌ Ошибка при добавлении профиля. Попробуйте позже.")
+        
+        except Exception as e:
+            logger.error(f"Ошибка при добавлении профиля: {e}")
+            await update.message.reply_text("Произошла ошибка при добавлении профиля.")
     
     async def close(self):
         """Закрытие ресурсов"""

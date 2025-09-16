@@ -73,6 +73,9 @@ class MessageHandler:
             
             elif state == UserState.AWAITING_NOTIFICATION_TIME:
                 await self._handle_notification_time_input(update, context, text)
+            
+            elif state == UserState.AWAITING_PLAYER_TAG_TO_ADD_PROFILE:
+                await self.message_generator.handle_add_profile_tag(update, context, tag)
         
         except Exception as e:
             logger.error(f"Ошибка при обработке состояния {state}: {e}")
@@ -92,6 +95,9 @@ class MessageHandler:
             
             elif text == Keyboards.PROFILE_BTN:
                 await self.message_generator.handle_profile_menu_request(update, context)
+            
+            elif text == Keyboards.PROFILE_MANAGER_BTN:
+                await self.message_generator.handle_profile_manager_request(update, context)
             
             elif text == Keyboards.CLAN_BTN:
                 await update.message.reply_text("Меню клана:", 
@@ -390,6 +396,21 @@ class CallbackHandler:
             elif callback_type == Keyboards.BUILDING_TOGGLE_CALLBACK:
                 await self._handle_building_toggle(update, context)
             
+            elif callback_type == Keyboards.PROFILE_MANAGER_CALLBACK:
+                await self._handle_profile_manager(update, context)
+            
+            elif callback_type == Keyboards.PROFILE_SELECT_CALLBACK:
+                await self._handle_profile_select(update, context, data_parts)
+            
+            elif callback_type == Keyboards.PROFILE_DELETE_CALLBACK:
+                await self._handle_profile_delete_menu(update, context)
+            
+            elif callback_type == Keyboards.PROFILE_DELETE_CONFIRM_CALLBACK:
+                await self._handle_profile_delete_confirm(update, context, data_parts)
+            
+            elif callback_type == Keyboards.PROFILE_ADD_CALLBACK:
+                await self._handle_profile_add(update, context)
+            
             elif callback_type == "confirm_payment":
                 await self._handle_payment_confirmation(update, context, data_parts)
             
@@ -659,3 +680,33 @@ class CallbackHandler:
         await self.message_generator.display_war_violations(
             update, context, clan_tag, war_end_time
         )
+
+    async def _handle_profile_manager(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка открытия менеджера профилей"""
+        await self.message_generator.handle_profile_manager_request(update, context)
+
+    async def _handle_profile_select(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                   data_parts: list):
+        """Обработка выбора профиля"""
+        if len(data_parts) < 2:
+            return
+        
+        player_tag = data_parts[1]
+        await self.message_generator.display_profile_from_manager(update, context, player_tag)
+
+    async def _handle_profile_delete_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка открытия меню удаления профиля"""
+        await self.message_generator.handle_profile_delete_menu(update, context)
+
+    async def _handle_profile_delete_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                           data_parts: list):
+        """Обработка подтверждения удаления профиля"""
+        if len(data_parts) < 2:
+            return
+        
+        player_tag = data_parts[1]
+        await self.message_generator.handle_profile_delete_confirm(update, context, player_tag)
+
+    async def _handle_profile_add(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка добавления нового профиля"""
+        await self.message_generator.handle_profile_add_request(update, context)

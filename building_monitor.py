@@ -141,15 +141,15 @@ class BuildingMonitor:
             upgrades = await self._compare_buildings(last_snapshot, player_data)
             
             if upgrades:
-                # Отправляем уведомления об улучшениях
-                await self._send_upgrade_notifications(tracker.telegram_id, upgrades)
+                # Отправляем уведомления об улучшениях с информацией об игроке
+                await self._send_upgrade_notifications(tracker.telegram_id, upgrades, tracker.player_tag)
                 
                 # Сохраняем новый снимок
                 await self._create_snapshot(tracker.player_tag, player_data)
             
             # Обновляем время последней проверки
             now = datetime.now().isoformat()
-            await self.db_service.update_tracker_last_check(tracker.telegram_id, now)
+            await self.db_service.update_tracker_last_check(tracker.telegram_id, now, tracker.player_tag)
             
         except Exception as e:
             logger.error(f"[Монитор зданий] Ошибка при проверке игрока {tracker.player_tag}: {e}")
@@ -245,18 +245,37 @@ class BuildingMonitor:
         
         return upgrades
     
-    async def _send_upgrade_notifications(self, telegram_id: int, upgrades: List[BuildingUpgrade]):
+    async def _send_upgrade_notifications(self, telegram_id: int, upgrades: List[BuildingUpgrade], player_tag: str):
         """Отправка уведомлений об улучшениях"""
         if not self.bot:
             return
         
         try:
+            # Проверяем, есть ли у пользователя несколько профилей
+            user_profiles = await self.db_service.get_user_profiles(telegram_id)
+            show_account_info = len(user_profiles) > 1
+            
+            # Получаем информацию об игроке для идентификации
+            player_name = "Неизвестно"
+            if show_account_info:
+                try:
+                    # Здесь должно быть обращение к API, но для упрощения используем тег
+                    # В реальной реализации стоит кэшировать имена игроков
+                    player_name = player_tag
+                except:
+                    player_name = player_tag
+            
             for upgrade in upgrades:
                 # Переводим название на русский
                 building_name_ru = self.building_names_ru.get(upgrade.building_name, upgrade.building_name)
                 
-                message = (
-                    f"🏗️ <b>Улучшение завершено!</b>\n\n"
+                message = f"🏗️ <b>Улучшение завершено!</b>\n\n"
+                
+                # Добавляем информацию об аккаунте, если у пользователя несколько профилей
+                if show_account_info:
+                    message += f"👤 Аккаунт: {player_name}\n\n"
+                
+                message += (
                     f"🔨 {building_name_ru} улучшен с {upgrade.old_level} на {upgrade.new_level} уровень!\n\n"
                     f"🎉 Поздравляем с успешным улучшением!"
                 )
@@ -267,7 +286,7 @@ class BuildingMonitor:
                     parse_mode='HTML'
                 )
                 
-                logger.info(f"Отправлено уведомление об улучшении {building_name_ru} пользователю {telegram_id}")
+                logger.info(f"Отправлено уведомление об улучшении {building_name_ru} пользователю {telegram_id} (игрок {player_tag})")
                 
         except Exception as e:
             logger.error(f"Ошибка при отправке уведомлений: {e}")

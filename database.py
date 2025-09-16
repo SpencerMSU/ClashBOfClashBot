@@ -132,11 +132,13 @@ class DatabaseService:
             # Создание таблицы отслеживания зданий
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS building_trackers (
-                    telegram_id INTEGER PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_id INTEGER NOT NULL,
                     player_tag TEXT NOT NULL,
                     is_active INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
-                    last_check TEXT
+                    last_check TEXT,
+                    UNIQUE(telegram_id, player_tag)
                 )
             """)
             
@@ -688,11 +690,32 @@ class DatabaseService:
             return False
     
     async def get_building_tracker(self, telegram_id: int) -> Optional[BuildingTracker]:
-        """Получение настроек отслеживания зданий пользователя"""
+        """Получение настроек отслеживания зданий пользователя (первый найденный)"""
+        trackers = await self.get_user_building_trackers(telegram_id)
+        return trackers[0] if trackers else None
+
+    async def get_user_building_trackers(self, telegram_id: int) -> List[BuildingTracker]:
+        """Получение всех настроек отслеживания зданий пользователя"""
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute(
                 "SELECT telegram_id, player_tag, is_active, created_at, last_check FROM building_trackers WHERE telegram_id = ?",
                 (telegram_id,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [BuildingTracker(
+                    telegram_id=row[0],
+                    player_tag=row[1],
+                    is_active=bool(row[2]),
+                    created_at=row[3],
+                    last_check=row[4]
+                ) for row in rows]
+
+    async def get_building_tracker_for_profile(self, telegram_id: int, player_tag: str) -> Optional[BuildingTracker]:
+        """Получение настроек отслеживания для конкретного профиля"""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT telegram_id, player_tag, is_active, created_at, last_check FROM building_trackers WHERE telegram_id = ? AND player_tag = ?",
+                (telegram_id, player_tag)
             ) as cursor:
                 row = await cursor.fetchone()
                 if row:
@@ -704,6 +727,45 @@ class DatabaseService:
                         last_check=row[4]
                     )
                 return None
+
+    async def toggle_building_tracker_for_profile(self, telegram_id: int, player_tag: str) -> bool:
+        """Переключение отслеживания для конкретного профиля"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                # Проверяем, существует ли трекер
+                async with db.execute(
+                    "SELECT is_active FROM building_trackers WHERE telegram_id = ? AND player_tag = ?",
+                    (telegram_id, player_tag)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    
+                    if row:
+                        # Переключаем состояние
+                        new_state = not bool(row[0])
+                        await db.execute(
+                            "UPDATE building_trackers SET is_active = ? WHERE telegram_id = ? AND player_tag = ?",
+                            (int(new_state), telegram_id, player_tag)
+                        )
+                    else:
+                        # Создаем новый трекер
+                        tracker = BuildingTracker(
+                            telegram_id=telegram_id,
+                            player_tag=player_tag,
+                            is_active=True,
+                            created_at=datetime.now().isoformat()
+                        )
+                        await db.execute("""
+                            INSERT INTO building_trackers 
+                            (telegram_id, player_tag, is_active, created_at, last_check)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (tracker.telegram_id, tracker.player_tag, int(tracker.is_active), 
+                              tracker.created_at, tracker.last_check))
+                    
+                    await db.commit()
+                    return True
+        except Exception as e:
+            logger.error(f"Ошибка при переключении отслеживания: {e}")
+            return False
     
     async def get_active_building_trackers(self) -> List[BuildingTracker]:
         """Получение всех активных отслеживателей зданий"""
@@ -751,14 +813,22 @@ class DatabaseService:
                     )
                 return None
     
-    async def update_tracker_last_check(self, telegram_id: int, last_check: str) -> bool:
+    async def update_tracker_last_check(self, telegram_id: int, last_check: str, player_tag: str = None) -> bool:
         """Обновление времени последней проверки отслеживателя"""
         try:
             async with aiosqlite.connect(self.db_path) as db:
-                await db.execute(
-                    "UPDATE building_trackers SET last_check = ? WHERE telegram_id = ?",
-                    (last_check, telegram_id)
-                )
+                if player_tag:
+                    # Обновляем для конкретного профиля
+                    await db.execute(
+                        "UPDATE building_trackers SET last_check = ? WHERE telegram_id = ? AND player_tag = ?",
+                        (last_check, telegram_id, player_tag)
+                    )
+                else:
+                    # Обновляем для всех профилей пользователя (для обратной совместимости)
+                    await db.execute(
+                        "UPDATE building_trackers SET last_check = ? WHERE telegram_id = ?",
+                        (last_check, telegram_id)
+                    )
                 await db.commit()
                 return True
         except Exception as e:
