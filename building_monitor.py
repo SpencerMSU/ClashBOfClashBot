@@ -291,29 +291,83 @@ class BuildingMonitor:
         except Exception as e:
             logger.error(f"Ошибка при отправке уведомлений: {e}")
     
-    async def activate_tracking(self, telegram_id: int, player_tag: str) -> bool:
-        """Активация отслеживания зданий для пользователя"""
+    async def activate_tracking(self, telegram_id: int, player_tag: str = None) -> bool:
+        """Активация отслеживания зданий для пользователя (всех профилей)"""
         try:
             # Проверяем, что у пользователя есть премиум подписка
             subscription = await self.db_service.get_subscription(telegram_id)
             if not subscription or not subscription.is_active or subscription.is_expired():
                 return False
             
-            tracker = BuildingTracker(
-                telegram_id=telegram_id,
-                player_tag=player_tag,
-                is_active=True,
-                created_at=datetime.now().isoformat()
-            )
+            # Получаем все профили пользователя
+            user_profiles = await self.db_service.get_user_profiles(telegram_id)
             
-            success = await self.db_service.save_building_tracker(tracker)
-            if success:
-                logger.info(f"Активировано отслеживание зданий для пользователя {telegram_id}, игрок {player_tag}")
+            # Если нет профилей в новой системе, используем старую систему
+            if not user_profiles and player_tag:
+                user = await self.db_service.find_user(telegram_id)
+                if user:
+                    user_profiles = [type('Profile', (), {'player_tag': user.player_tag})]
+            elif not user_profiles:
+                logger.warning(f"Пользователь {telegram_id} не имеет привязанных профилей")
+                return False
             
-            return success
+            success_count = 0
+            for profile in user_profiles:
+                profile_tag = getattr(profile, 'player_tag', profile.player_tag if hasattr(profile, 'player_tag') else None)
+                if not profile_tag:
+                    continue
+                    
+                tracker = BuildingTracker(
+                    telegram_id=telegram_id,
+                    player_tag=profile_tag,
+                    is_active=True,
+                    created_at=datetime.now().isoformat()
+                )
+                
+                success = await self.db_service.save_building_tracker(tracker)
+                if success:
+                    success_count += 1
+                    logger.info(f"Активировано отслеживание зданий для пользователя {telegram_id}, игрок {profile_tag}")
+                    
+                    # Создаем первоначальный снимок
+                    async with self.coc_client as client:
+                        player_data = await client.get_player_info(profile_tag)
+                        if player_data:
+                            await self._create_initial_snapshot(profile_tag, player_data)
+            
+            return success_count > 0
             
         except Exception as e:
             logger.error(f"Ошибка при активации отслеживания: {e}")
+            return False
+
+    async def is_tracking_active(self, telegram_id: int) -> bool:
+        """Проверка активности отслеживания для пользователя"""
+        try:
+            user_trackers = await self.db_service.get_user_building_trackers(telegram_id)
+            return any(tracker.is_active for tracker in user_trackers)
+        except Exception as e:
+            logger.error(f"Ошибка при проверке статуса отслеживания: {e}")
+            return False
+
+    async def deactivate_tracking(self, telegram_id: int) -> bool:
+        """Деактивация отслеживания зданий для всех профилей пользователя"""
+        try:
+            user_trackers = await self.db_service.get_user_building_trackers(telegram_id)
+            success_count = 0
+            
+            for tracker in user_trackers:
+                if tracker.is_active:
+                    tracker.is_active = False
+                    success = await self.db_service.save_building_tracker(tracker)
+                    if success:
+                        success_count += 1
+                        logger.info(f"Деактивировано отслеживание зданий для пользователя {telegram_id}, игрок {tracker.player_tag}")
+            
+            return success_count > 0
+            
+        except Exception as e:
+            logger.error(f"Ошибка при деактивации отслеживания: {e}")
             return False
     
     async def _deactivate_tracker(self, telegram_id: int):
