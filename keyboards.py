@@ -96,7 +96,8 @@ class Keyboards:
             [InlineKeyboardButton("👥 Участники", callback_data=Keyboards.MEMBERS_CALLBACK)],
             [InlineKeyboardButton("⚔️ История войн", callback_data=Keyboards.WAR_LIST_CALLBACK)],
             [InlineKeyboardButton("⚔️ Текущая война", callback_data="current_war")],
-            [InlineKeyboardButton("🏆 ЛВК", callback_data="cwl_info")]
+            [InlineKeyboardButton("🏆 ЛВК", callback_data="cwl_info")],
+            [InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")]
         ]
         return InlineKeyboardMarkup(keyboard)
     
@@ -191,6 +192,9 @@ class Keyboards:
                                                    callback_data=f"{Keyboards.MEMBERS_SORT_CALLBACK}:{clan_tag}:{sort_type}:{view_type}:{current_page+1}"))
         
         keyboard.append(nav_buttons)
+        
+        # Add back button
+        keyboard.append([InlineKeyboardButton("⬅️ К информации о клане", callback_data="clan_info")])
         
         return InlineKeyboardMarkup(keyboard)
     

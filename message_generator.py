@@ -282,6 +282,52 @@ class MessageGenerator:
             message, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
         )
     
+    async def display_war_attacks(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                 clan_tag: str, war_end_time: str):
+        """Отображение статистики атак войны"""
+        war_details = await self.db_service.get_war_details(war_end_time)
+        
+        if not war_details:
+            await update.callback_query.edit_message_text(
+                "❌ Война не найдена."
+            )
+            return
+        
+        message = self._format_war_attacks(war_details)
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Назад к деталям войны", 
+                                callback_data=f"{Keyboards.WAR_INFO_CALLBACK}:{clan_tag}:{war_end_time}")],
+            [InlineKeyboardButton("⬅️ К списку войн", 
+                                callback_data=f"{Keyboards.WAR_LIST_CALLBACK}:{clan_tag}:recent:1")]
+        ])
+        
+        await update.callback_query.edit_message_text(
+            message, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
+        )
+    
+    async def display_war_violations(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                   clan_tag: str, war_end_time: str):
+        """Отображение нарушений войны"""
+        war_details = await self.db_service.get_war_details(war_end_time)
+        
+        if not war_details:
+            await update.callback_query.edit_message_text(
+                "❌ Война не найдена."
+            )
+            return
+        
+        message = self._format_war_violations(war_details)
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Назад к деталям войны", 
+                                callback_data=f"{Keyboards.WAR_INFO_CALLBACK}:{clan_tag}:{war_end_time}")],
+            [InlineKeyboardButton("⬅️ К списку войн", 
+                                callback_data=f"{Keyboards.WAR_LIST_CALLBACK}:{clan_tag}:recent:1")]
+        ])
+        
+        await update.callback_query.edit_message_text(
+            message, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
+        )
+    
     async def handle_notifications_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка меню уведомлений"""
         chat_id = update.effective_chat.id
@@ -501,6 +547,89 @@ class MessageGenerator:
         
         return message
     
+    def _format_war_attacks(self, war: Dict[Any, Any]) -> str:
+        """Форматирование статистики атак войны"""
+        opponent_name = war['opponent_name']
+        attacks = war.get('attacks', [])
+        team_size = war['team_size']
+        
+        message = f"📊 *Статистика атак*\n\n"
+        message += f"🛡 vs {opponent_name}\n"
+        message += f"⚔️ Всего атак: {len(attacks)}\n\n"
+        
+        if not attacks:
+            message += "❌ Данные об атаках не найдены."
+            return message
+        
+        # Группируем атаки по игрокам
+        player_attacks = {}
+        for attack in attacks:
+            attacker = attack.get('attacker_name', 'Неизвестно')
+            if attacker not in player_attacks:
+                player_attacks[attacker] = []
+            player_attacks[attacker].append(attack)
+        
+        message += "👥 *Атаки по игрокам:*\n"
+        for i, (player, player_attack_list) in enumerate(player_attacks.items(), 1):
+            total_stars = sum(attack.get('stars', 0) for attack in player_attack_list)
+            total_destruction = sum(attack.get('destruction_percentage', 0) for attack in player_attack_list)
+            avg_destruction = total_destruction / len(player_attack_list) if player_attack_list else 0
+            
+            message += f"{i}. **{player}**\n"
+            message += f"   ⚔️ Атак: {len(player_attack_list)} | ⭐ Звезд: {total_stars} | 💥 Среднее разрушение: {avg_destruction:.1f}%\n\n"
+        
+        return message
+    
+    def _format_war_violations(self, war: Dict[Any, Any]) -> str:
+        """Форматирование нарушений войны"""
+        opponent_name = war['opponent_name']
+        total_violations = war['total_violations']
+        attacks = war.get('attacks', [])
+        team_size = war['team_size']
+        
+        message = f"🚫 *Нарушения правил*\n\n"
+        message += f"🛡 vs {opponent_name}\n"
+        message += f"🚫 Всего нарушений: {total_violations}\n\n"
+        
+        if total_violations == 0:
+            message += "✅ Нарушений не обнаружено! Все участники соблюдали правила войны."
+            return message
+        
+        # Анализируем атаки для поиска нарушений
+        violations = []
+        member_attack_count = {}
+        
+        # Подсчитываем количество атак каждого игрока
+        for attack in attacks:
+            attacker = attack.get('attacker_name', 'Неизвестно')
+            member_attack_count[attacker] = member_attack_count.get(attacker, 0) + 1
+        
+        # Ищем игроков, которые не атаковали
+        expected_attackers = team_size  # Каждый должен атаковать
+        actual_attackers = len(member_attack_count)
+        
+        if actual_attackers < expected_attackers:
+            missed_attacks = expected_attackers - actual_attackers
+            violations.append(f"❌ Пропущенных атак: {missed_attacks}")
+        
+        # Ищем игроков с неполными атаками (менее 2 атак)
+        incomplete_attacks = []
+        for player, count in member_attack_count.items():
+            if count < 2:
+                incomplete_attacks.append(f"{player} ({count}/2)")
+        
+        if incomplete_attacks:
+            violations.append(f"⚠️ Неполные атаки: {', '.join(incomplete_attacks)}")
+        
+        if violations:
+            message += "📋 *Обнаруженные нарушения:*\n"
+            for violation in violations:
+                message += f"• {violation}\n"
+        else:
+            message += "ℹ️ Подробная информация о нарушениях недоступна."
+        
+        return message
+    
     def _sort_members(self, members: List[Dict], sort_type: str) -> List[Dict]:
         """Сортировка участников клана"""
         if sort_type == MemberSort.ROLE:
@@ -547,6 +676,8 @@ class MessageGenerator:
                 keyboard = Keyboards.subscription_status(True)
             else:
                 # У пользователя нет активной подписки
+                from policy import get_policy_url
+                
                 message = (
                     f"💎 <b>Премиум подписки</b>\n\n"
                     f"🚀 <b>Выберите тип подписки:</b>\n\n"
@@ -560,6 +691,7 @@ class MessageGenerator:
                     f"• 📈 Расширенная аналитика\n"
                     f"• 🛡️ Эксклюзивные функции\n"
                     f"• ⚙️ Персональные настройки\n\n"
+                    f"📋 <a href='{get_policy_url()}'>Политика оплаты и возвратов</a>\n\n"
                     f"💰 <b>Выберите подписку:</b>"
                 )
                 keyboard = Keyboards.subscription_types()
