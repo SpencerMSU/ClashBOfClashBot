@@ -37,6 +37,7 @@ class Keyboards:
     MEMBERS_SORT_CALLBACK = "members_sort"
     MEMBERS_VIEW_CALLBACK = "members_view"
     SUBSCRIPTION_CALLBACK = "subscription"
+    SUBSCRIPTION_EXTEND_CALLBACK = "subscription_extend"
     SUBSCRIPTION_TYPE_CALLBACK = "sub_type"
     SUBSCRIPTION_PERIOD_CALLBACK = "sub_period"
     SUBSCRIPTION_PAY_CALLBACK = "sub_pay"
@@ -399,7 +400,7 @@ class Keyboards:
         keyboard = []
         if has_subscription:
             keyboard.append([InlineKeyboardButton("💎 Продлить подписку", 
-                                                callback_data=Keyboards.SUBSCRIPTION_CALLBACK)])
+                                                callback_data=Keyboards.SUBSCRIPTION_EXTEND_CALLBACK)])
             keyboard.append([InlineKeyboardButton("👑 Меню премиум", 
                                                 callback_data=Keyboards.PREMIUM_MENU_CALLBACK)])
         else:
