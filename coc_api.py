@@ -120,12 +120,6 @@ class CocApiClient:
         if validation_message:
             logger.warning(f"Тег игрока '{player_tag}': {validation_message}")
         
-        # Дополнительная проверка: если тег точно клановый, выдаем ошибку
-        if is_clan_tag(player_tag):
-            logger.error(f"Попытка использовать тег клана '{player_tag}' как тег игрока. "
-                        f"Используйте get_clan_info() для получения информации о клане.")
-            return None
-        
         formatted_tag = quote(player_tag, safe='')
         endpoint = f"/players/{formatted_tag}"
         
@@ -274,10 +268,10 @@ def is_clan_tag(tag: str) -> bool:
     # Убираем #, пробелы и приводим к верхнему регистру
     clean_tag = tag.replace('#', '').replace(' ', '').upper()
     
-    # Теги кланов обычно 9 символов
-    # Теги игроков обычно 8-10 символов, но чаще всего 8-9
-    # Более точная проверка: если 9 символов - скорее всего клан
-    return len(clean_tag) == 9
+    # Простая проверка длины - теги кланов обычно 8-9 символов
+    # Но нельзя точно определить тип тега только по длине
+    # Эта функция должна использоваться осторожно
+    return 8 <= len(clean_tag) <= 9
 
 
 def is_player_tag(tag: str) -> bool:
@@ -313,7 +307,7 @@ def validate_player_tag(tag: str) -> tuple[bool, str]:
     
     # Предупреждение, если похоже на тег клана
     if len(clean_tag) == 9:
-        return True, "Внимание: тег из 9 символов может быть тегом клана"
+        return True, "Внимание: тег из 9 символов может быть тегом клана. Если поиск не дает результатов, попробуйте поиск по клану."
     
     return True, ""
 

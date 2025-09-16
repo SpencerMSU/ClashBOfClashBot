@@ -120,6 +120,8 @@ class ClashBot:
                 await self._handle_payment_success(update, context, command_arg)
                 return
         
+        from policy import get_policy_url
+        
         await update.message.reply_text(
             "🎮 Добро пожаловать в бота для Clash of Clans!\n\n"
             "Этот бот поможет вам:\n"
@@ -127,8 +129,11 @@ class ClashBot:
             "• Получать информацию о кланах\n"
             "• Отслеживать войны и статистику\n"
             "• Получать уведомления о клановых войнах\n\n"
+            f"📋 [Политика использования и возвратов]({get_policy_url()})\n\n"
+            "Используя бота, вы соглашаетесь с политикой использования.\n\n"
             "Выберите действие в меню ниже:",
-            reply_markup=Keyboards.main_menu()
+            reply_markup=Keyboards.main_menu(),
+            parse_mode='Markdown'
         )
     
     async def _handle_payment_success(self, update, context, command_arg):

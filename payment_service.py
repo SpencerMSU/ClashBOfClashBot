@@ -41,21 +41,21 @@ class YooKassaService:
     # Названия подписок
     SUBSCRIPTION_NAMES = {
         # Premium
-        "premium_1month": "💎 Премиум на 1 месяц",
-        "premium_3months": "💎 Премиум на 3 месяца",
-        "premium_6months": "💎 Премиум на 6 месяцев", 
-        "premium_1year": "💎 Премиум на 1 год",
+        "premium_1month": "ClashBot Премиум подписка на 1 месяц",
+        "premium_3months": "ClashBot Премиум подписка на 3 месяца",
+        "premium_6months": "ClashBot Премиум подписка на 6 месяцев", 
+        "premium_1year": "ClashBot Премиум подписка на 1 год",
         # PRO PLUS
-        "proplus_1month": "👑 ПРО ПЛЮС на 1 месяц",
-        "proplus_3months": "👑 ПРО ПЛЮС на 3 месяца",
-        "proplus_6months": "👑 ПРО ПЛЮС на 6 месяцев",
-        "proplus_1year": "👑 ПРО ПЛЮС на 1 год",
-        "proplus_permanent": "👑 ПРО ПЛЮС (Вечная)",
+        "proplus_1month": "ClashBot ПРО ПЛЮС подписка на 1 месяц",
+        "proplus_3months": "ClashBot ПРО ПЛЮС подписка на 3 месяца",
+        "proplus_6months": "ClashBot ПРО ПЛЮС подписка на 6 месяцев",
+        "proplus_1year": "ClashBot ПРО ПЛЮС подписка на 1 год",
+        "proplus_permanent": "ClashBot ПРО ПЛЮС подписка (Вечная)",
         # Legacy support
-        "1month": "Премиум подписка на 1 месяц",
-        "3months": "Премиум подписка на 3 месяца",
-        "6months": "Премиум подписка на 6 месяцев",
-        "1year": "Премиум подписка на 1 год"
+        "1month": "ClashBot Премиум подписка на 1 месяц",
+        "3months": "ClashBot Премиум подписка на 3 месяца",
+        "6months": "ClashBot Премиум подписка на 6 месяцев",
+        "1year": "ClashBot Премиум подписка на 1 год"
     }
     
     def __init__(self, bot_username: str = None):
@@ -184,3 +184,65 @@ class YooKassaService:
     def get_subscription_name(self, subscription_type: str) -> str:
         """Получение названия подписки"""
         return self.SUBSCRIPTION_NAMES.get(subscription_type, "Неизвестная подписка")
+    
+    async def create_refund(self, payment_id: str, amount: float, reason: str = None) -> Optional[Dict]:
+        """Создание возврата платежа"""
+        try:
+            refund_data = {
+                "amount": {
+                    "value": f"{amount:.2f}",
+                    "currency": "RUB"
+                },
+                "payment_id": payment_id
+            }
+            
+            if reason:
+                refund_data["description"] = reason
+            
+            session = await self._get_session()
+            async with session.post(
+                f"{self.API_URL}/refunds",
+                headers=self._get_auth_headers(),
+                json=refund_data
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    logger.info(f"Возврат создан: {result.get('id')}")
+                    return result
+                else:
+                    error_text = await response.text()
+                    logger.error(f"Ошибка создания возврата: {response.status} - {error_text}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Исключение при создании возврата: {e}")
+            return None
+    
+    async def process_refund_notification(self, telegram_id: int, payment_id: str, 
+                                        refund_amount: float, bot) -> bool:
+        """Обработка уведомления о возврате"""
+        try:
+            # Уменьшаем дни подписки у пользователя
+            # Это нужно реализовать в database service
+            
+            # Отправляем уведомление пользователю
+            notification_text = (
+                f"🔄 *Уведомление о возврате*\n\n"
+                f"Был совершен возврат на покупку с ID `{payment_id}`.\n"
+                f"Сумма возврата: {refund_amount:.2f} ₽\n\n"
+                f"Дни подписки были списаны с вашего аккаунта.\n\n"
+                f"Если возврат ошибочен, напишите техническому специалисту @Negodayo"
+            )
+            
+            await bot.send_message(
+                chat_id=telegram_id,
+                text=notification_text,
+                parse_mode='Markdown'
+            )
+            
+            logger.info(f"Уведомление о возврате отправлено пользователю {telegram_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке уведомления о возврате: {e}")
+            return False

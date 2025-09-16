@@ -396,6 +396,12 @@ class CallbackHandler:
             elif callback_type == "clan_info":
                 await self._handle_clan_info_callback(update, context)
             
+            elif callback_type == "war_attacks":
+                await self._handle_war_attacks(update, context, data_parts)
+            
+            elif callback_type == "war_violations":
+                await self._handle_war_violations(update, context, data_parts)
+            
             elif callback_type == "main_menu":
                 await query.edit_message_text("Главное меню:")
                 await query.message.reply_text("Выберите действие:", 
@@ -626,4 +632,30 @@ class CallbackHandler:
         subscription_type = data_parts[1]
         await self.message_generator.handle_subscription_period_selection(
             update, context, subscription_type
+        )
+    
+    async def _handle_war_attacks(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                 data_parts: list):
+        """Обработка статистики атак войны"""
+        if len(data_parts) < 3:
+            return
+        
+        clan_tag = data_parts[1]
+        war_end_time = data_parts[2]
+        
+        await self.message_generator.display_war_attacks(
+            update, context, clan_tag, war_end_time
+        )
+    
+    async def _handle_war_violations(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                   data_parts: list):
+        """Обработка нарушений войны"""
+        if len(data_parts) < 3:
+            return
+        
+        clan_tag = data_parts[1]
+        war_end_time = data_parts[2]
+        
+        await self.message_generator.display_war_violations(
+            update, context, clan_tag, war_end_time
         )
