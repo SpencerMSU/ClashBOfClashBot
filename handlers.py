@@ -366,6 +366,9 @@ class CallbackHandler:
             elif callback_type == Keyboards.SUBSCRIPTION_CALLBACK:
                 await self._handle_subscription_menu(update, context)
             
+            elif callback_type == Keyboards.SUBSCRIPTION_EXTEND_CALLBACK:
+                await self._handle_subscription_extend(update, context)
+            
             elif callback_type == Keyboards.SUBSCRIPTION_PERIOD_CALLBACK:
                 await self._handle_subscription_period(update, context, data_parts)
             
@@ -560,6 +563,10 @@ class CallbackHandler:
     async def _handle_subscription_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка меню подписки"""
         await self.message_generator.handle_subscription_menu(update, context)
+    
+    async def _handle_subscription_extend(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка продления подписки"""
+        await self.message_generator.handle_subscription_extend(update, context)
     
     async def _handle_subscription_period(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
                                          data_parts: list):

@@ -5,7 +5,7 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
-from telegram import Update, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
@@ -585,6 +585,52 @@ class MessageGenerator:
                 await update.callback_query.edit_message_text(error_message)
             else:
                 await update.message.reply_text(error_message)
+    
+    async def handle_subscription_extend(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка продления подписки для пользователей с активной подпиской"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Получаем текущую подписку пользователя
+            subscription = await self.db_service.get_subscription(chat_id)
+            
+            if not subscription or not subscription.is_active or subscription.is_expired():
+                # Если подписки нет, перенаправляем к обычному меню
+                await self.handle_subscription_menu(update, context)
+                return
+            
+            # Показываем меню продления подписки
+            subscription_type_display = "👑 ПРО ПЛЮС" if "proplus" in subscription.subscription_type else "💎 Премиум"
+            message = (
+                f"{subscription_type_display} <b>Продление подписки</b>\n\n"
+                f"📅 Текущая подписка: {self.payment_service.get_subscription_name(subscription.subscription_type)}\n"
+                f"⏰ Действует до: {subscription.end_date.strftime('%d.%m.%Y %H:%M')}\n"
+                f"📊 Дней осталось: {subscription.days_remaining()}\n\n"
+                f"🚀 <b>Выберите тип подписки для продления:</b>\n\n"
+                f"💎 <b>Премиум:</b>\n"
+                f"• 🔔 Расширенные уведомления\n"
+                f"• 📊 Базовая статистика\n"
+                f"• 🎯 Дополнительные функции\n\n"
+                f"👑 <b>ПРО ПЛЮС:</b>\n"
+                f"• ✨ Все функции Премиум\n"
+                f"• 🔥 Приоритетная поддержка\n"
+                f"• 📈 Расширенная аналитика\n"
+                f"• 🛡️ Эксклюзивные функции\n"
+                f"• ⚙️ Персональные настройки\n\n"
+                f"💰 <b>Выберите подписку для продления:</b>"
+            )
+            keyboard = Keyboards.subscription_types()
+            
+            await update.callback_query.edit_message_text(
+                message, 
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при обработке продления подписки: {e}")
+            await update.callback_query.edit_message_text("Произошла ошибка при загрузке меню продления подписки.")
+    
     
     async def handle_subscription_type_selection(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
                                                 subscription_type: str):
