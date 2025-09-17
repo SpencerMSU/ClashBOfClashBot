@@ -213,55 +213,87 @@ class MessageGenerator:
     
     async def display_clan_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE, clan_tag: str):
         """Отображение информации о клане"""
+        # Определяем контекст вызова - из callback или из сообщения
+        is_callback = hasattr(update, 'callback_query') and update.callback_query is not None
+        
+        # Показываем индикатор загрузки
+        if is_callback:
+            loading_message = await update.callback_query.edit_message_text("🔍 Получение информации о клане...")
+        else:
+            loading_message = await update.message.reply_text("🔍 Получение информации о клане...")
+        
         async with self.coc_client as client:
             clan_data = await client.get_clan_info(clan_tag)
             
             if not clan_data:
-                await update.message.reply_text(
-                    "❌ Клан с таким тегом не найден.",
-                    reply_markup=Keyboards.main_menu()
-                )
+                error_message = "❌ Клан с таким тегом не найден."
+                if is_callback:
+                    await update.callback_query.edit_message_text(error_message)
+                else:
+                    await loading_message.edit_text(error_message)
+                    await update.message.reply_text("Выберите действие:", reply_markup=Keyboards.main_menu())
                 return
             
             # Сохраняем тег клана для дальнейшего использования
             context.user_data['inspecting_clan'] = clan_tag
             
-            # Форматируем информацию о ��лане
+            # Форматируем информацию о клане
             message = self._format_clan_info(clan_data)
             keyboard = Keyboards.clan_inspection_menu()
             
-            await update.message.reply_text(
-                message, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
-            )
+            if is_callback:
+                await update.callback_query.edit_message_text(
+                    message, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
+                )
+            else:
+                await loading_message.edit_text(
+                    message, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
+                )
     
     async def display_members_page(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                   clan_tag: str, page: int, sort_type: str, view_type: str):
         """Отображение страницы участников клана"""
-        async with self.coc_client as client:
-            members_data = await client.get_clan_members(clan_tag)
-            
-            if not members_data:
+        # Показываем индикатор загрузки
+        await update.callback_query.edit_message_text("👥 Загрузка участников клана...")
+        
+        try:
+            async with self.coc_client as client:
+                members_data = await client.get_clan_members(clan_tag)
+                
+                if not members_data:
+                    await update.callback_query.edit_message_text(
+                        "❌ Не удалось получить список участников клана."
+                    )
+                    return
+                
+                # Сортируем участников
+                sorted_members = self._sort_members(members_data, sort_type)
+                
+                # Пагинация
+                total_members = len(sorted_members)
+                total_pages = (total_members + self.MEMBERS_PER_PAGE - 1) // self.MEMBERS_PER_PAGE
+                start_idx = (page - 1) * self.MEMBERS_PER_PAGE
+                end_idx = start_idx + self.MEMBERS_PER_PAGE
+                page_members = sorted_members[start_idx:end_idx]
+                
+                # Форматируем сообщение
+                message = self._format_members_page(page_members, page, total_pages, total_members, view_type)
+                keyboard = Keyboards.members_with_profiles(clan_tag, page, total_pages, sort_type, view_type, page_members)
+                
                 await update.callback_query.edit_message_text(
-                    "❌ Не удалось получить список участников клана."
+                    message, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
                 )
-                return
-            
-            # Сортируем участников
-            sorted_members = self._sort_members(members_data, sort_type)
-            
-            # Пагинация
-            total_members = len(sorted_members)
-            total_pages = (total_members + self.MEMBERS_PER_PAGE - 1) // self.MEMBERS_PER_PAGE
-            start_idx = (page - 1) * self.MEMBERS_PER_PAGE
-            end_idx = start_idx + self.MEMBERS_PER_PAGE
-            page_members = sorted_members[start_idx:end_idx]
-            
-            # Форматируем сообщение
-            message = self._format_members_page(page_members, page, total_pages, total_members, view_type)
-            keyboard = Keyboards.members_with_profiles(clan_tag, page, total_pages, sort_type, view_type, page_members)
-            
+                
+        except asyncio.TimeoutError:
+            logger.error(f"Таймаут при получении участников клана {clan_tag}")
             await update.callback_query.edit_message_text(
-                message, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard
+                "⏱️ Превышено время ожидания при загрузке участников.\n"
+                "Попробуйте позже."
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при получении участников клана: {e}")
+            await update.callback_query.edit_message_text(
+                "❌ Произошла ошибка при получении участников клана."
             )
     
     async def display_war_list_page(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
@@ -1037,6 +1069,9 @@ class MessageGenerator:
     
     async def display_current_war(self, update: Update, context: ContextTypes.DEFAULT_TYPE, clan_tag: str):
         """Отображение информации о текущей войне клана"""
+        # Показываем индикатор загрузки
+        await update.callback_query.edit_message_text("⚔️ Получение информации о войне...")
+        
         try:
             async with self.coc_client as client:
                 war_data = await client.get_clan_current_war(clan_tag)
@@ -1063,6 +1098,12 @@ class MessageGenerator:
                     message, parse_mode=ParseMode.MARKDOWN
                 )
         
+        except asyncio.TimeoutError:
+            logger.error(f"Таймаут при получении информации о войне для клана {clan_tag}")
+            await update.callback_query.edit_message_text(
+                "⏱️ Превышено время ожидания при загрузке данных о войне.\n"
+                "Попробуйте позже."
+            )
         except Exception as e:
             logger.error(f"Ошибка при получении информации о текущей войне: {e}")
             await update.callback_query.edit_message_text(
@@ -1071,6 +1112,9 @@ class MessageGenerator:
     
     async def display_cwl_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE, clan_tag: str):
         """Отображение информации о Лиге войн кланов (CWL)"""
+        # Показываем индикатор загрузки
+        await update.callback_query.edit_message_text("🏆 Получение информации о ЛВК...")
+        
         try:
             async with self.coc_client as client:
                 cwl_data = await client.get_clan_war_league_group(clan_tag)
@@ -1088,6 +1132,12 @@ class MessageGenerator:
                     message, parse_mode=ParseMode.MARKDOWN
                 )
         
+        except asyncio.TimeoutError:
+            logger.error(f"Таймаут при получении информации о ЛВК для клана {clan_tag}")
+            await update.callback_query.edit_message_text(
+                "⏱️ Превышено время ожидания при загрузке данных о ЛВК.\n"
+                "Попробуйте позже."
+            )
         except Exception as e:
             logger.error(f"Ошибка при получении информации о ЛВК: {e}")
             await update.callback_query.edit_message_text(
@@ -1809,6 +1859,9 @@ class MessageGenerator:
         """Обработка запроса просмотра привязанных кланов"""
         chat_id = update.effective_chat.id
         
+        # Показываем индикатор загрузки
+        loading_message = await update.message.reply_text("🔍 Загрузка привязанных кланов...")
+        
         try:
             # Получаем привязанные кланы пользователя
             linked_clans = await self.db_service.get_linked_clans(chat_id)
@@ -1844,15 +1897,24 @@ class MessageGenerator:
                 message += "📝 У вас нет привязанных кланов.\n"
                 message += "Нажмите на пустой слот, чтобы привязать клан."
             
-            await update.message.reply_text(
+            await loading_message.edit_text(
                 message,
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=Keyboards.linked_clans_menu(clans_data, max_clans)
             )
         
+        except asyncio.TimeoutError:
+            logger.error(f"Таймаут при получении привязанных кланов для пользователя {chat_id}")
+            await loading_message.edit_text(
+                "⏱️ Не удалось загрузить данные из-за превышения времени ожидания.\n"
+                "Попробуйте позже или обратитесь к администратору."
+            )
         except Exception as e:
             logger.error(f"Ошибка при получении привязанных кланов: {e}")
-            await update.message.reply_text("Произошла ошибка при получении привязанных кланов.")
+            await loading_message.edit_text(
+                "❌ Произошла ошибка при получении привязанных кланов.\n"
+                "Попробуйте позже или обратитесь к администратору."
+            )
     
     async def handle_link_clan_tag(self, update: Update, context: ContextTypes.DEFAULT_TYPE, clan_tag: str):
         """Обработка привязки клана по тегу"""
