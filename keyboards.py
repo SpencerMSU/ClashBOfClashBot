@@ -1,7 +1,7 @@
 """
 Клавиатуры и кнопки для бота - аналог Java Keyboards
 """
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from datetime import datetime, date
 
@@ -18,12 +18,13 @@ class Keyboards:
     SEARCH_CLAN_BTN = "🔍 Найти клан по тегу"
     BACK_BTN = "⬅️ Назад в главное меню"
     MY_PROFILE_PREFIX = "👤 Мой профиль"
+    PROFILE_MANAGER_BTN = "👥 Менеджер профилей"
     CLAN_MEMBERS_BTN = "👥 Список участников"
     CLAN_WARLOG_BTN = "⚔️ Последние войны"
     BACK_TO_CLAN_MENU_BTN = "⬅️ Назад в меню кланов"
     CLAN_CURRENT_CWL_BTN = "⚔️ Текущее ЛВК"
     CLAN_CWL_BONUS_BTN = "🏆 Бонусы ЛВК"
-    NOTIFICATIONS_BTN = "🔔 Уведомления о КВ"
+    NOTIFICATIONS_BTN = "🔔 Уведомления"
     CLAN_CURRENT_WAR_BTN = "⚔️ Текущая КВ"
     SUBSCRIPTION_BTN = "💎 Премиум подписка"
     
@@ -46,6 +47,11 @@ class Keyboards:
     NOTIFY_CUSTOM_CALLBACK = "notify_custom"
     BUILDING_TRACKER_CALLBACK = "building_tracker"
     BUILDING_TOGGLE_CALLBACK = "building_toggle"
+    PROFILE_MANAGER_CALLBACK = "profile_manager"
+    PROFILE_SELECT_CALLBACK = "profile_select"
+    PROFILE_DELETE_CALLBACK = "profile_delete"
+    PROFILE_DELETE_CONFIRM_CALLBACK = "profile_delete_confirm"
+    PROFILE_ADD_CALLBACK = "profile_add"
     
     @staticmethod
     def main_menu() -> ReplyKeyboardMarkup:
@@ -57,11 +63,16 @@ class Keyboards:
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     @staticmethod
-    def profile_menu(player_name: Optional[str] = None) -> ReplyKeyboardMarkup:
+    def profile_menu(player_name: Optional[str] = None, has_premium: bool = False, 
+                    profile_count: int = 0) -> ReplyKeyboardMarkup:
         """Меню профиля"""
         keyboard = []
         
-        if player_name:
+        if has_premium and profile_count > 0:
+            # Для премиум пользователей с профилями показываем менеджер профилей
+            keyboard.append([KeyboardButton(Keyboards.PROFILE_MANAGER_BTN)])
+        elif player_name:
+            # Для обычных пользователей или премиум с одним профилем
             keyboard.append([KeyboardButton(f"{Keyboards.MY_PROFILE_PREFIX} ({player_name})")])
         else:
             keyboard.append([KeyboardButton(Keyboards.LINK_ACC_BTN)])
@@ -71,7 +82,7 @@ class Keyboards:
         
         keyboard.extend([
             [KeyboardButton(Keyboards.SEARCH_PROFILE_BTN)],
-            [KeyboardButton(Keyboards.MY_CLAN_BTN)] if player_name else [],
+            [KeyboardButton(Keyboards.MY_CLAN_BTN)] if (player_name or (has_premium and profile_count > 0)) else [],
             [KeyboardButton(Keyboards.BACK_BTN)]
         ])
         
@@ -455,6 +466,8 @@ class Keyboards:
         if is_premium:
             keyboard.append([InlineKeyboardButton("⚙️ Настройка доп. уведомлений", 
                                                 callback_data=Keyboards.NOTIFY_ADVANCED_CALLBACK)])
+            keyboard.append([InlineKeyboardButton("🏗️ Отслеживание улучшений зданий", 
+                                                callback_data=Keyboards.BUILDING_TRACKER_CALLBACK)])
         
         keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="main_menu")])
         return InlineKeyboardMarkup(keyboard)
@@ -470,6 +483,60 @@ class Keyboards:
             [KeyboardButton("⬅️ Назад в главное меню")]
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+    @staticmethod
+    def profile_manager_menu(profiles: List[Dict[str, Any]], max_profiles: int) -> InlineKeyboardMarkup:
+        """Меню менеджера профилей для премиум пользователей"""
+        keyboard = []
+        
+        # Добавляем кнопки для каждого профиля
+        for i, profile in enumerate(profiles):
+            profile_name = profile.get('profile_name') or f"Профиль {i+1}"
+            player_name = profile.get('player_name', 'Неизвестно')
+            text = f"👤 {profile_name} ({player_name})"
+            if profile.get('is_primary'):
+                text = f"⭐ {text}"
+            
+            keyboard.append([InlineKeyboardButton(text, 
+                                                callback_data=f"{Keyboards.PROFILE_SELECT_CALLBACK}:{profile['player_tag']}")])
+        
+        # Кнопка добавления нового профиля (если не достигнут лимит)
+        if len(profiles) < max_profiles:
+            keyboard.append([InlineKeyboardButton("➕ Добавить профиль", 
+                                                callback_data=Keyboards.PROFILE_ADD_CALLBACK)])
+        
+        # Кнопка удаления профиля (если есть профили)
+        if profiles:
+            keyboard.append([InlineKeyboardButton("🗑️ Удалить профиль", 
+                                                callback_data=Keyboards.PROFILE_DELETE_CALLBACK)])
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Назад в меню профиля", callback_data="profile_menu")])
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def profile_delete_menu(profiles: List[Dict[str, Any]]) -> InlineKeyboardMarkup:
+        """Меню выбора профиля для удаления"""
+        keyboard = []
+        
+        for i, profile in enumerate(profiles):
+            profile_name = profile.get('profile_name') or f"Профиль {i+1}"
+            player_name = profile.get('player_name', 'Неизвестно')
+            text = f"🗑️ {profile_name} ({player_name})"
+            
+            keyboard.append([InlineKeyboardButton(text, 
+                                                callback_data=f"{Keyboards.PROFILE_DELETE_CONFIRM_CALLBACK}:{profile['player_tag']}")])
+        
+        keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data=Keyboards.PROFILE_MANAGER_CALLBACK)])
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod 
+    def get_subscription_max_profiles(subscription_type: str) -> int:
+        """Получение максимального количества профилей для типа подписки"""
+        if subscription_type.startswith("premium"):
+            return 3
+        elif subscription_type.startswith("proplus") or subscription_type.startswith("pro"):
+            return 5
+        return 1  # Для обычных пользователей только 1 профиль
 
 
 # Перечисления для сортировки
