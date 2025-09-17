@@ -7,6 +7,7 @@ import json
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 import uuid
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 class YooKassaService:
     """Сервис для работы с YooKassa API"""
     
-    # Тестовые реквизиты YooKassa
+    # Тестовые реквизиты YooKassa (fallback значения)
     TEST_SHOP_ID = "510603"
     TEST_SECRET_KEY = "test_*g63-87pIRJ5cQ4f7Pqtpl_L7ktfD69OfmhATrDtAQLtk"
     API_URL = "https://api.yookassa.ru/v3"
@@ -77,7 +78,12 @@ class YooKassaService:
     def _get_auth_headers(self) -> Dict[str, str]:
         """Получение заголовков авторизации"""
         import base64
-        credentials = f"{self.TEST_SHOP_ID}:{self.TEST_SECRET_KEY}"
+        
+        # Используем credentials из конфигурации, fallback на тестовые значения
+        shop_id = config.YOOKASSA_SHOP_ID or self.TEST_SHOP_ID
+        secret_key = config.YOOKASSA_SECRET_KEY or self.TEST_SECRET_KEY
+        
+        credentials = f"{shop_id}:{secret_key}"
         encoded_credentials = base64.b64encode(credentials.encode()).decode()
         
         return {
