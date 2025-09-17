@@ -51,6 +51,7 @@ class MessageHandler:
             text == Keyboards.BACK_TO_CLAN_MENU_BTN or
             text == Keyboards.NOTIFICATIONS_BTN or
             text == Keyboards.SUBSCRIPTION_BTN or
+            text == Keyboards.LINKED_CLANS_BTN or
             text.startswith(Keyboards.MY_PROFILE_PREFIX)):
             # Очищаем состояние и обрабатываем как команду меню
             context.user_data.pop('state', None)
@@ -70,6 +71,9 @@ class MessageHandler:
             
             elif state == UserState.AWAITING_CLAN_TAG_TO_SEARCH:
                 await self.message_generator.display_clan_info(update, context, tag)
+            
+            elif state == UserState.AWAITING_CLAN_TAG_TO_LINK:
+                await self.message_generator.handle_link_clan_tag(update, context, tag)
             
             elif state == UserState.AWAITING_NOTIFICATION_TIME:
                 await self._handle_notification_time_input(update, context, text)
@@ -126,6 +130,9 @@ class MessageHandler:
                     "Отправьте тег клана для поиска.\n"
                     "Например: #ABC123DEF"
                 )
+            
+            elif text == Keyboards.LINKED_CLANS_BTN:
+                await self.message_generator.handle_linked_clans_request(update, context)
             
             elif text == Keyboards.NOTIFICATIONS_BTN:
                 await self.message_generator.handle_notifications_menu(update, context)
@@ -410,6 +417,15 @@ class CallbackHandler:
             
             elif callback_type == Keyboards.PROFILE_ADD_CALLBACK:
                 await self._handle_profile_add(update, context)
+            
+            elif callback_type == Keyboards.LINKED_CLAN_SELECT_CALLBACK:
+                await self._handle_linked_clan_select(update, context, data_parts)
+            
+            elif callback_type == Keyboards.LINKED_CLAN_ADD_CALLBACK:
+                await self._handle_linked_clan_add(update, context, data_parts)
+            
+            elif callback_type == Keyboards.LINKED_CLAN_DELETE_CALLBACK:
+                await self._handle_linked_clan_delete(update, context, data_parts)
             
             elif callback_type == "confirm_payment":
                 await self._handle_payment_confirmation(update, context, data_parts)
@@ -710,3 +726,36 @@ class CallbackHandler:
     async def _handle_profile_add(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка добавления нового профиля"""
         await self.message_generator.handle_profile_add_request(update, context)
+    
+    async def _handle_linked_clan_select(self, update: Update, context: ContextTypes.DEFAULT_TYPE, data_parts: list):
+        """Обработка выбора привязанного клана"""
+        if len(data_parts) < 2:
+            return
+        
+        clan_tag = data_parts[1]
+        await self.message_generator.display_clan_info(update, context, clan_tag)
+    
+    async def _handle_linked_clan_add(self, update: Update, context: ContextTypes.DEFAULT_TYPE, data_parts: list):
+        """Обработка добавления нового привязанного клана"""
+        if len(data_parts) < 2:
+            return
+        
+        slot_number = int(data_parts[1])
+        context.user_data['linking_clan_slot'] = slot_number
+        context.user_data['state'] = UserState.AWAITING_CLAN_TAG_TO_LINK
+        
+        await update.callback_query.edit_message_text(
+            f"📝 *Привязка клана к слоту {slot_number}*\n\n"
+            f"Отправьте тег клана для привязки.\n"
+            f"Например: #ABC123DEF\n\n"
+            f"Тег клана можно найти в игре в информации о клане.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    
+    async def _handle_linked_clan_delete(self, update: Update, context: ContextTypes.DEFAULT_TYPE, data_parts: list):
+        """Обработка удаления привязанного клана"""
+        if len(data_parts) < 2:
+            return
+        
+        slot_number = int(data_parts[1])
+        await self.message_generator.handle_linked_clan_delete(update, context, slot_number)

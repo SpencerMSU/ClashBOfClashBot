@@ -438,7 +438,8 @@ class MessageGenerator:
         best_versus_trophies = player_data.get('bestVersusTrophies', 0)
         versus_battle_wins = player_data.get('versusBattleWins', 0)
         
-        if builder_hall_level > 0:
+        # Show builder base info if player has any builder base activity or level > 0
+        if builder_hall_level > 0 or versus_trophies > 0 or best_versus_trophies > 0 or versus_battle_wins > 0:
             message += f"\n🏗️ *База строителя:*\n"
             message += f"🏘️ Дом строителя: {builder_hall_level} уровень\n"
             message += f"🏆 Трофеи против: {versus_trophies:,}\n"
@@ -456,6 +457,11 @@ class MessageGenerator:
             message += f"\n🛡 *Клан:* {clan_name}\n"
             message += f"🏷 `{clan_tag}`\n"
             message += f"👑 Роль: {role_text}"
+            
+            # Add clan position if available
+            clan_rank = player_data.get('clanRank')
+            if clan_rank:
+                message += f"\n📍 Позиция в клане: {clan_rank}"
             
             # Add clan level if available
             clan_level = clan_info.get('clanLevel', 0)
@@ -1798,6 +1804,137 @@ class MessageGenerator:
         except Exception as e:
             logger.error(f"Ошибка при добавлении профиля: {e}")
             await update.message.reply_text("Произошла ошибка при добавлении профиля.")
+    
+    async def handle_linked_clans_request(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка запроса просмотра привязанных кланов"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Получаем привязанные кланы пользователя
+            linked_clans = await self.db_service.get_linked_clans(chat_id)
+            max_clans = await self.db_service.get_max_linked_clans_for_user(chat_id)
+            
+            # Подготавливаем данные для клавиатуры
+            clans_data = []
+            for clan in linked_clans:
+                clans_data.append({
+                    'clan_tag': clan.clan_tag,
+                    'clan_name': clan.clan_name,
+                    'slot_number': clan.slot_number
+                })
+            
+            # Формируем сообщение
+            subscription = await self.db_service.get_subscription(chat_id)
+            user_tier = "обычный"
+            if subscription and subscription.is_active and not subscription.is_expired():
+                if subscription.subscription_type in ["proplus", "proplus_permanent"]:
+                    user_tier = "Pro Plus"
+                elif subscription.subscription_type in ["premium"]:
+                    user_tier = "Premium"
+            
+            message = f"🔗 *Привязанные кланы*\n\n"
+            message += f"👤 Тип аккаунта: {user_tier}\n"
+            message += f"📊 Использовано слотов: {len(linked_clans)}/{max_clans}\n\n"
+            
+            if linked_clans:
+                message += "🛡 *Привязанные кланы:*\n"
+                for clan in linked_clans:
+                    message += f"   {clan.slot_number}. {clan.clan_name} `{clan.clan_tag}`\n"
+            else:
+                message += "📝 У вас нет привязанных кланов.\n"
+                message += "Нажмите на пустой слот, чтобы привязать клан."
+            
+            await update.message.reply_text(
+                message,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=Keyboards.linked_clans_menu(clans_data, max_clans)
+            )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при получении привязанных кланов: {e}")
+            await update.message.reply_text("Произошла ошибка при получении привязанных кланов.")
+    
+    async def handle_link_clan_tag(self, update: Update, context: ContextTypes.DEFAULT_TYPE, clan_tag: str):
+        """Обработка привязки клана по тегу"""
+        chat_id = update.effective_chat.id
+        slot_number = context.user_data.get('linking_clan_slot', 1)
+        
+        try:
+            # Получаем информацию о клане через API
+            async with self.coc_client as client:
+                clan_data = await client.get_clan_info(clan_tag)
+                
+                if not clan_data:
+                    await update.message.reply_text(
+                        "❌ Клан не найден. Проверьте правильность тега и попробуйте снова."
+                    )
+                    return
+                
+                clan_name = clan_data.get('name', 'Неизвестный клан')
+                
+                # Проверяем лимиты пользователя
+                max_clans = await self.db_service.get_max_linked_clans_for_user(chat_id)
+                current_clans = await self.db_service.get_linked_clans(chat_id)
+                
+                if len(current_clans) >= max_clans:
+                    await update.message.reply_text(
+                        f"❌ Достигнут лимит привязанных кланов ({max_clans}).\n"
+                        f"Удалите существующий клан, чтобы добавить новый."
+                    )
+                    return
+                
+                # Создаем запись о привязанном клане
+                from models.linked_clan import LinkedClan
+                linked_clan = LinkedClan(
+                    telegram_id=chat_id,
+                    clan_tag=clan_tag,
+                    clan_name=clan_name,
+                    slot_number=slot_number
+                )
+                
+                # Сохраняем в базу данных
+                success = await self.db_service.save_linked_clan(linked_clan)
+                
+                if success:
+                    await update.message.reply_text(
+                        f"✅ Клан успешно привязан!\n\n"
+                        f"🛡 Клан: {clan_name}\n"
+                        f"🏷 Тег: `{clan_tag}`\n"
+                        f"📍 Слот: {slot_number}",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                    
+                    # Возвращаемся к меню привязанных кланов
+                    await asyncio.sleep(2)
+                    await self.handle_linked_clans_request(update, context)
+                else:
+                    await update.message.reply_text("❌ Ошибка при сохранении клана. Попробуйте позже.")
+        
+        except Exception as e:
+            logger.error(f"Ошибка при привязке клана: {e}")
+            await update.message.reply_text("Произошла ошибка при привязке клана.")
+    
+    async def handle_linked_clan_delete(self, update: Update, context: ContextTypes.DEFAULT_TYPE, slot_number: int):
+        """Обработка удаления привязанного клана"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            success = await self.db_service.delete_linked_clan(chat_id, slot_number)
+            
+            if success:
+                await update.callback_query.edit_message_text(
+                    f"✅ Клан из слота {slot_number} успешно удален!"
+                )
+                
+                # Возвращаемся к меню привязанных кланов
+                await asyncio.sleep(2)
+                await self.handle_linked_clans_request(update, context)
+            else:
+                await update.callback_query.edit_message_text("❌ Ошибка при удалении клана.")
+        
+        except Exception as e:
+            logger.error(f"Ошибка при удалении привязанного клана: {e}")
+            await update.callback_query.edit_message_text("Произошла ошибка при удалении клана.")
     
     async def close(self):
         """Закрытие ресурсов"""
