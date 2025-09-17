@@ -46,6 +46,10 @@ class BotConfig:
         self.BOT_USERNAME: str = api_tokens.get('BOT_USERNAME', '') or os.getenv('BOT_USERNAME', '')
         self.COC_API_TOKEN: str = api_tokens.get('COC_API_TOKEN', '') or os.getenv('COC_API_TOKEN', '')
         
+        # YooKassa платежные реквизиты
+        self.YOOKASSA_SHOP_ID: str = api_tokens.get('YOOKASSA_SHOP_ID', '') or os.getenv('YOOKASSA_SHOP_ID', '')
+        self.YOOKASSA_SECRET_KEY: str = api_tokens.get('YOOKASSA_SECRET_KEY', '') or os.getenv('YOOKASSA_SECRET_KEY', '')
+        
         # Настройки базы данных
         self.DATABASE_PATH: str = os.getenv('DATABASE_PATH', 'clashbot.db')
         

@@ -47,6 +47,10 @@ COC_API_TOKEN=ваш_clash_of_clans_api_token
 
 # Bot Username (имя пользователя бота без @)
 BOT_USERNAME=имя_вашего_бота
+
+# YooKassa реквизиты для платежей (необязательно, есть тестовые значения по умолчанию)
+YOOKASSA_SHOP_ID=ваш_shop_id_yookassa
+YOOKASSA_SECRET_KEY=ваш_secret_key_yookassa
 ```
 
 **Альтернативный способ**: Вы также можете использовать переменные окружения вместо файла (создать `.env` файл на основе `.env.example`), но приоритет отдается файлу `api_tokens.txt`.
@@ -113,6 +117,8 @@ python main.py
 | `BOT_TOKEN` | Токен Telegram бота | Да |
 | `COC_API_TOKEN` | Токен API Clash of Clans | Да |
 | `BOT_USERNAME` | Имя пользователя бота | Нет |
+| `YOOKASSA_SHOP_ID` | ID магазина YooKassa | Нет |
+| `YOOKASSA_SECRET_KEY` | Секретный ключ YooKassa | Нет |
 
 ### Переменные окружения (альтернативный способ)
 
@@ -126,6 +132,8 @@ python main.py
 | `DATABASE_PATH` | Путь к БД | Нет | clashbot.db |
 | `ARCHIVE_CHECK_INTERVAL` | Интервал проверки архиватора (сек) | Нет | 900 |
 | `DONATION_SNAPSHOT_INTERVAL` | Интервал снимков донатов (сек) | Нет | 21600 |
+| `YOOKASSA_SHOP_ID` | ID магазина YooKassa | Нет | - |
+| `YOOKASSA_SECRET_KEY` | Секретный ключ YooKassa | Нет | - |
 
 ## Логирование
 
