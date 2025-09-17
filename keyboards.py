@@ -27,6 +27,7 @@ class Keyboards:
     NOTIFICATIONS_BTN = "🔔 Уведомления"
     CLAN_CURRENT_WAR_BTN = "⚔️ Текущая КВ"
     SUBSCRIPTION_BTN = "💎 Премиум подписка"
+    LINKED_CLANS_BTN = "🔗 Привязанные кланы"
     
     # Константы для callback-данных
     MEMBERS_CALLBACK = "members"
@@ -52,6 +53,10 @@ class Keyboards:
     PROFILE_DELETE_CALLBACK = "profile_delete"
     PROFILE_DELETE_CONFIRM_CALLBACK = "profile_delete_confirm"
     PROFILE_ADD_CALLBACK = "profile_add"
+    LINKED_CLANS_CALLBACK = "linked_clans"
+    LINKED_CLAN_SELECT_CALLBACK = "linked_clan_select"
+    LINKED_CLAN_ADD_CALLBACK = "linked_clan_add"
+    LINKED_CLAN_DELETE_CALLBACK = "linked_clan_delete"
     
     @staticmethod
     def main_menu() -> ReplyKeyboardMarkup:
@@ -96,6 +101,7 @@ class Keyboards:
         """Меню клана"""
         keyboard = [
             [KeyboardButton(Keyboards.SEARCH_CLAN_BTN)],
+            [KeyboardButton(Keyboards.LINKED_CLANS_BTN)],
             [KeyboardButton(Keyboards.BACK_BTN)]
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -537,6 +543,43 @@ class Keyboards:
         elif subscription_type.startswith("proplus") or subscription_type.startswith("pro"):
             return 5
         return 1  # Для обычных пользователей только 1 профиль
+
+    @staticmethod
+    def linked_clans_menu(linked_clans: List[Dict[str, Any]], max_clans: int) -> InlineKeyboardMarkup:
+        """Меню привязанных кланов"""
+        keyboard = []
+        
+        # Добавляем кнопки для каждого привязанного клана
+        for clan in linked_clans:
+            clan_name = clan.get('clan_name', 'Неизвестный клан')
+            slot_number = clan.get('slot_number', 1)
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"🛡 {clan_name}", 
+                    callback_data=f"{Keyboards.LINKED_CLAN_SELECT_CALLBACK}:{clan['clan_tag']}"
+                ),
+                InlineKeyboardButton(
+                    f"🗑️ Удалить", 
+                    callback_data=f"{Keyboards.LINKED_CLAN_DELETE_CALLBACK}:{slot_number}"
+                )
+            ])
+        
+        # Добавляем пустые слоты для привязки новых кланов
+        current_count = len(linked_clans)
+        for slot in range(current_count + 1, max_clans + 1):
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"➕ Слот {slot} (пустой)", 
+                    callback_data=f"{Keyboards.LINKED_CLAN_ADD_CALLBACK}:{slot}"
+                )
+            ])
+        
+        # Кнопка возврата в главное меню
+        keyboard.append([
+            InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")
+        ])
+        
+        return InlineKeyboardMarkup(keyboard)
 
 
 # Перечисления для сортировки

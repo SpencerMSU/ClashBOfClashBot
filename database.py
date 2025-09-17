@@ -12,6 +12,7 @@ from models.user_profile import UserProfile
 from models.war import WarToSave, AttackData
 from models.subscription import Subscription
 from models.building import BuildingSnapshot, BuildingUpgrade, BuildingTracker
+from models.linked_clan import LinkedClan
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,25 @@ class DatabaseService:
                     buildings_data TEXT NOT NULL,
                     UNIQUE(player_tag, snapshot_time)
                 )
+            """)
+            
+            # Создание таблицы привязанных кланов
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS linked_clans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_id INTEGER NOT NULL,
+                    clan_tag TEXT NOT NULL,
+                    clan_name TEXT NOT NULL,
+                    slot_number INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(telegram_id, slot_number)
+                )
+            """)
+            
+            # Создание индекса для привязанных кланов
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_linked_clans_telegram_id 
+                ON linked_clans(telegram_id)
             """)
             
             await db.commit()
@@ -834,3 +854,71 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Ошибка при обновлении времени проверки: {e}")
             return False
+    
+    # Методы для работы с привязанными кланами
+    async def get_linked_clans(self, telegram_id: int) -> List[LinkedClan]:
+        """Получение всех привязанных кланов пользователя"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute(
+                    "SELECT id, telegram_id, clan_tag, clan_name, slot_number, created_at "
+                    "FROM linked_clans WHERE telegram_id = ? ORDER BY slot_number",
+                    (telegram_id,)
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                    return [LinkedClan(
+                        id=row[0],
+                        telegram_id=row[1],
+                        clan_tag=row[2],
+                        clan_name=row[3],
+                        slot_number=row[4],
+                        created_at=row[5]
+                    ) for row in rows]
+        except Exception as e:
+            logger.error(f"Ошибка при получении привязанных кланов: {e}")
+            return []
+    
+    async def save_linked_clan(self, linked_clan: LinkedClan) -> bool:
+        """Сохранение привязанного клана"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    "INSERT OR REPLACE INTO linked_clans "
+                    "(telegram_id, clan_tag, clan_name, slot_number, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (linked_clan.telegram_id, linked_clan.clan_tag, linked_clan.clan_name,
+                     linked_clan.slot_number, linked_clan.created_at)
+                )
+                await db.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении привязанного клана: {e}")
+            return False
+    
+    async def delete_linked_clan(self, telegram_id: int, slot_number: int) -> bool:
+        """Удаление привязанного клана по номеру слота"""
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    "DELETE FROM linked_clans WHERE telegram_id = ? AND slot_number = ?",
+                    (telegram_id, slot_number)
+                )
+                await db.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при удалении привязанного клана: {e}")
+            return False
+    
+    async def get_max_linked_clans_for_user(self, telegram_id: int) -> int:
+        """Получение максимального количества привязанных кланов для пользователя"""
+        try:
+            subscription = await self.get_subscription(telegram_id)
+            if subscription and subscription.is_active and not subscription.is_expired():
+                if subscription.subscription_type in ["proplus", "proplus_permanent"]:
+                    return 5  # Pro Plus
+                elif subscription.subscription_type in ["premium"]:
+                    return 3  # Premium
+            return 1  # Regular user
+        except Exception as e:
+            logger.error(f"Ошибка при получении лимита привязанных кланов: {e}")
+            return 1
