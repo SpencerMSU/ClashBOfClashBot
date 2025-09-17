@@ -253,6 +253,7 @@ class MessageHandler:
         
         if text.lower() == 'отмена':
             context.user_data.pop('configuring_notification', None)
+            context.user_data.pop('state', None)
             await update.message.reply_text(
                 "❌ Настройка уведомления отменена.",
                 reply_markup=Keyboards.main_menu()
@@ -262,12 +263,13 @@ class MessageHandler:
         # Парсим время
         time_minutes = self._parse_notification_time(text)
         
-        if time_minutes is None:
+        if time_minutes is None or time_minutes <= 0:
             await update.message.reply_text(
                 "❌ Неверный формат времени.\n\n"
                 "Используйте:\n"
                 "• Минуты: 15m, 30m, 45m\n"
                 "• Часы: 1h, 2h, 12h\n\n"
+                "⚠️ Время должно быть положительным числом.\n"
                 "Попробуйте еще раз или напишите 'отмена':"
             )
             return
@@ -295,6 +297,7 @@ class MessageHandler:
         
         # Очищаем состояние
         context.user_data.pop('configuring_notification', None)
+        context.user_data.pop('state', None)
     
     def _parse_notification_time(self, text: str) -> Optional[int]:
         """Парсинг времени уведомления в минуты"""
