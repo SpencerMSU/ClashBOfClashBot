@@ -36,20 +36,31 @@ class CocApiClient:
     async def __aenter__(self):
         """Асинхронный контекстный менеджер - вход"""
         if not self.session:
-            # Создаем коннектор с пулом соединений для оптимизации
+            # Создаем коннектор с улучшенными настройками для стабильности
             connector = aiohttp.TCPConnector(
-                limit=100,  # Максимум 100 соединений в пуле
-                limit_per_host=30,  # Максимум 30 соединений на хост
+                limit=50,  # Уменьшаем общий лимит для стабильности
+                limit_per_host=10,  # Уменьшаем лимит на хост
                 enable_cleanup_closed=True,
-                keepalive_timeout=300  # Держим соединения живыми 5 минут
+                keepalive_timeout=60,  # Уменьшаем время жизни соединений
+                ttl_dns_cache=300,  # Кэшируем DNS на 5 минут
+                use_dns_cache=True,
+                family=0,  # Использовать и IPv4 и IPv6
+                ssl=False,  # COC API использует HTTPS, но отключаем дополнительную проверку SSL
+                force_close=False  # Переиспользуем соединения
             )
             
             self.session = aiohttp.ClientSession(
                 headers={
                     'Authorization': f'Bearer {self.api_token}',
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'ClashBot/1.0 (aiohttp)'
                 },
-                timeout=aiohttp.ClientTimeout(total=10),  # Уменьшили таймаут до 10 секунд
+                timeout=aiohttp.ClientTimeout(
+                    total=30,      # Общий таймаут
+                    connect=10,    # Таймаут подключения
+                    sock_read=20,  # Таймаут чтения
+                    sock_connect=10  # Таймаут сокета
+                ),
                 connector=connector
             )
         return self
@@ -59,54 +70,108 @@ class CocApiClient:
         # НЕ закрываем сессию здесь, так как она может использоваться повторно
         pass
 
-    async def _make_request(self, endpoint: str) -> Optional[Dict[Any, Any]]:
-        """Базовый метод для выполнения HTTP запросов"""
+    async def _make_request(self, endpoint: str, max_retries: int = 3) -> Optional[Dict[Any, Any]]:
+        """Базовый метод для выполнения HTTP запросов с retry логикой"""
         # Используем сессию из контекстного менеджера или создаем новую
         session_to_use = self.session
         if not session_to_use:
             # Создаем временную сессию для одного запроса
             connector = aiohttp.TCPConnector(
-                limit=100,
-                limit_per_host=30,
+                limit=50,
+                limit_per_host=10,
                 enable_cleanup_closed=True,
-                keepalive_timeout=300
+                keepalive_timeout=60,
+                ttl_dns_cache=300,
+                use_dns_cache=True
             )
             
             session_to_use = aiohttp.ClientSession(
                 headers={
                     'Authorization': f'Bearer {self.api_token}',
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'ClashBot/1.0 (aiohttp)'
                 },
-                timeout=aiohttp.ClientTimeout(total=15),
+                timeout=aiohttp.ClientTimeout(
+                    total=30,
+                    connect=10,
+                    sock_read=20,
+                    sock_connect=10
+                ),
                 connector=connector
             )
         
         url = f"{self.base_url}{endpoint}"
-        try:
-            async with session_to_use.get(url) as response:
-                if response.status == 403:
-                    logger.error("ОШИБКА 403: API ключ недействителен или ваш IP изменился. "
-                               "Проверьте настройки на developer.clashofclans.com")
-                    return None
-                elif response.status == 404:
-                    logger.warning(f"Ресурс не найден: {url}")
-                    return None
-                elif response.status != 200:
-                    logger.error(f"HTTP {response.status} при запросе к {url}")
-                    return None
-                
-                return await response.json()
+        last_exception = None
         
-        except asyncio.TimeoutError:
-            logger.error(f"Таймаут при запросе к {url}")
-            return None
-        except Exception as e:
-            logger.error(f"Ошибка при запросе к {url}: {e}")
-            return None
-        finally:
+        # Retry логика с экспоненциальной задержкой
+        for attempt in range(max_retries):
+            try:
+                async with session_to_use.get(url) as response:
+                    if response.status == 403:
+                        logger.error("ОШИБКА 403: API ключ недействителен или ваш IP изменился. "
+                                   "Проверьте настройки на developer.clashofclans.com")
+                        return None
+                    elif response.status == 404:
+                        logger.warning(f"Ресурс не найден: {url}")
+                        return None
+                    elif response.status == 429:
+                        # Rate limiting - ждем и повторяем
+                        retry_after = int(response.headers.get('Retry-After', 60))
+                        logger.warning(f"Rate limit достигнут для {url}. Ожидание {retry_after} секунд...")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(retry_after)
+                            continue
+                        return None
+                    elif response.status >= 500:
+                        # Серверные ошибки - можно повторить
+                        logger.warning(f"Серверная ошибка {response.status} для {url}. Попытка {attempt + 1}/{max_retries}")
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)  # Экспоненциальная задержка
+                            continue
+                        return None
+                    elif response.status != 200:
+                        logger.error(f"HTTP {response.status} при запросе к {url}")
+                        return None
+                    
+                    return await response.json()
+                    
+            except asyncio.TimeoutError as e:
+                last_exception = e
+                logger.warning(f"Таймаут при запросе к {url} (попытка {attempt + 1}/{max_retries})")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                    
+            except aiohttp.ClientConnectorError as e:
+                last_exception = e
+                logger.warning(f"Ошибка соединения с {url} (попытка {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                    
+            except aiohttp.ClientError as e:
+                last_exception = e
+                logger.warning(f"Сетевая ошибка при запросе к {url} (попытка {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                    
+            except Exception as e:
+                last_exception = e
+                logger.error(f"Неожиданная ошибка при запросе к {url}: {e}")
+                break  # Не повторяем при неожиданных ошибках
+        
+        # Если мы дошли сюда, все попытки неудачны
+        logger.error(f"Не удалось выполнить запрос к {url} после {max_retries} попыток. Последняя ошибка: {last_exception}")
+        
+        try:
             # Закрываем сессию только если она была создана временно
             if not self.session and session_to_use:
                 await session_to_use.close()
+        except Exception as cleanup_error:
+            logger.warning(f"Ошибка при закрытии временной сессии: {cleanup_error}")
+            
+        return None
 
     async def get_player_info(self, player_tag: str) -> Optional[Dict[Any, Any]]:
         """Получение информации об игроке"""
