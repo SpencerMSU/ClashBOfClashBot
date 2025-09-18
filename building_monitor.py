@@ -381,21 +381,4 @@ class BuildingMonitor:
                 
         except Exception as e:
             logger.error(f"Ошибка при деактивации отслеживания: {e}")
-    
-    async def deactivate_tracking(self, telegram_id: int) -> bool:
-        """Деактивация отслеживания зданий пользователем"""
-        try:
-            await self._deactivate_tracker(telegram_id)
-            return True
-        except Exception as e:
-            logger.error(f"Ошибка при деактивации отслеживания пользователем: {e}")
-            return False
-    
-    async def is_tracking_active(self, telegram_id: int) -> bool:
-        """Проверка активности отслеживания для пользователя"""
-        try:
-            tracker = await self.db_service.get_building_tracker(telegram_id)
-            return tracker is not None and tracker.is_active
-        except Exception as e:
-            logger.error(f"Ошибка при проверке статуса отслеживания: {e}")
             return False
