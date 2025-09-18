@@ -13,17 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 class YooKassaService:
-    """Сервис для работы с YooKassa API"""
+
     
     # Тестовые реквизиты YooKassa (fallback значения)
-    TEST_SHOP_ID = "510603"
-    TEST_SECRET_KEY = "test_*g63-87pIRJ5cQ4f7Pqtpl_L7ktfD69OfmhATrDtAQLtk"
+    TEST_SHOP_ID = "1164328"
+    TEST_SECRET_KEY = "live_FVe4M7peyvzGPRZrM4UJq4pF6soCfuv4VZEgntsPmhs"
     API_URL = "https://api.yookassa.ru/v3"
     
     # Цены подписок в рублях (снижены)
     SUBSCRIPTION_PRICES = {
         # Premium
-        "premium_1month": 49.00,
+        "premium_1month": 1.00,
         "premium_3months": 119.00,
         "premium_6months": 199.00,
         "premium_1year": 349.00,

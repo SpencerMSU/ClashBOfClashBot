@@ -226,7 +226,7 @@ class MessageGenerator:
             clan_data = await client.get_clan_info(clan_tag)
             
             if not clan_data:
-                error_message = "❌ Клан с таким тегом не найден."
+                error_message = "❌ Клан с таким тегом не найден или ведутся тех работы на стороне хостинга/апи."
                 if is_callback:
                     await update.callback_query.edit_message_text(error_message)
                 else:

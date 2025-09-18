@@ -57,67 +57,41 @@ class WarArchiver:
         logger.info("Сервис архивации войн остановлен")
     
     async def _archive_loop(self):
-        """Основной цикл архивации с улучшенной обработкой ошибок"""
-        consecutive_failures = 0
-        max_consecutive_failures = 5
-        base_sleep_on_error = 60  # базовая задержка при ошибке
-        
+        """Основной цикл архивации"""
         while self.is_running:
             try:
                 await self._check_current_war()
                 await self._check_donation_snapshots()
                 
-                # Сбрасываем счетчик неудач при успешном выполнении
-                consecutive_failures = 0
-                
                 # Ждем до следующей проверки
                 await asyncio.sleep(self.check_interval)
                 
             except asyncio.CancelledError:
-                logger.info("[Архиватор] Получен сигнал остановки")
                 break
             except Exception as e:
-                consecutive_failures += 1
-                logger.error(f"[Архиватор] Ошибка в фоновой задаче (неудача {consecutive_failures}/{max_consecutive_failures}): {e}")
-                
-                # Если слишком много последовательных неудач, увеличиваем задержку
-                if consecutive_failures >= max_consecutive_failures:
-                    sleep_time = base_sleep_on_error * 5  # 5 минут
-                    logger.warning(f"[Архиватор] Слишком много последовательных ошибок. Увеличиваем паузу до {sleep_time} секунд")
-                else:
-                    sleep_time = base_sleep_on_error
-                
-                # Ждем перед следующей попыткой
-                try:
-                    await asyncio.sleep(sleep_time)
-                except asyncio.CancelledError:
-                    break
+                logger.error(f"[Архиватор] Ошибка в фоновой задаче: {e}")
+                await asyncio.sleep(60)  # Ждем минуту перед повтором при ошибке
     
     async def _check_current_war(self):
-        """Проверка текущей войны с улучшенной обработкой ошибок"""
+        """Проверка текущей войны"""
         logger.info(f"[Архиватор] Проверка текущей войны для клана {self.clan_tag}")
         
-        try:
-            async with self.coc_client as client:
-                current_war = await client.get_clan_current_war(self.clan_tag)
-                
-                if not current_war:
-                    logger.warning(f"[Архиватор] Не удалось получить информацию о текущей войне для {self.clan_tag}")
-                    return
-                
-                war_state = current_war.get('state', '')
-                
-                # Проверяем на уведомления о начале войны
-                if war_state == 'preparation':
-                    await self._check_war_start_notification(current_war)
-                
-                # Проверяем завершенные войны
-                elif war_state == 'warEnded':
-                    await self._check_completed_war(current_war)
-                    
-        except Exception as e:
-            logger.error(f"[Архиватор] Ошибка при проверке текущей войны: {e}")
-            # Не перебрасываем исключение, чтобы не прерывать весь цикл
+        async with self.coc_client as client:
+            current_war = await client.get_clan_current_war(self.clan_tag)
+            
+            if not current_war:
+                logger.warning(f"[Архиватор] Не удалось получить информацию о текущей войне для {self.clan_tag}")
+                return
+            
+            war_state = current_war.get('state', '')
+            
+            # Проверяем на уведомления о начале войны
+            if war_state == 'preparation':
+                await self._check_war_start_notification(current_war)
+            
+            # Проверяем завершенные войны
+            elif war_state == 'warEnded':
+                await self._check_completed_war(current_war)
     
     async def _check_war_start_notification(self, war_data: Dict[Any, Any]):
         """Проверка и отправка уведомлений о начале войны"""
@@ -322,7 +296,7 @@ class WarArchiver:
             return "tie"
     
     async def _check_donation_snapshots(self):
-        """Проверка и создание снимков донатов с улучшенной обработкой ошибок"""
+        """Проверка и создание снимков донатов"""
         now = datetime.now()
         
         # Проверяем каждые 6 часов
@@ -340,9 +314,6 @@ class WarArchiver:
                         )
                         self.last_donation_snapshot = now
                         logger.info("[Архиватор] Снимок донатов сохранен.")
-                    else:
-                        logger.warning("[Архиватор] Не удалось получить данные клана для снимка донатов")
                         
             except Exception as e:
                 logger.error(f"[Архиватор] Ошибка при сохранении снимка донатов: {e}")
-                # Не перебрасываем исключение, чтобы не прерывать основной цикл

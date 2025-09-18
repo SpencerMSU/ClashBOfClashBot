@@ -84,40 +84,19 @@ class BuildingMonitor:
         logger.info("Сервис мониторинга зданий остановлен")
     
     async def _monitoring_loop(self):
-        """Основной цикл мониторинга с улучшенной обработкой ошибок"""
-        consecutive_failures = 0
-        max_consecutive_failures = 5
-        base_sleep_on_error = 60  # базовая задержка при ошибке
-        
+        """Основной цикл мониторинга"""
         while self.is_running:
             try:
                 await self._check_all_trackers()
                 
-                # Сбрасываем счетчик неудач при успешном выполнении
-                consecutive_failures = 0
-                
-                # Ждем до следующей проверки
+                # Ждем до следующей проверки (5 минут)
                 await asyncio.sleep(self.check_interval)
                 
             except asyncio.CancelledError:
-                logger.info("[Монитор зданий] Получен сигнал остановки")
                 break
             except Exception as e:
-                consecutive_failures += 1
-                logger.error(f"[Монитор зданий] Ошибка в фоновой задаче (неудача {consecutive_failures}/{max_consecutive_failures}): {e}")
-                
-                # Если слишком много последовательных неудач, увеличиваем задержку
-                if consecutive_failures >= max_consecutive_failures:
-                    sleep_time = base_sleep_on_error * 5  # 5 минут
-                    logger.warning(f"[Монитор зданий] Слишком много последовательных ошибок. Увеличиваем паузу до {sleep_time} секунд")
-                else:
-                    sleep_time = base_sleep_on_error
-                
-                # Ждем перед следующей попыткой
-                try:
-                    await asyncio.sleep(sleep_time)
-                except asyncio.CancelledError:
-                    break
+                logger.error(f"[Монитор зданий] Ошибка в фоновой задаче: {e}")
+                await asyncio.sleep(60)  # Ждем минуту перед повтором при ошибке
     
     async def _check_all_trackers(self):
         """Проверка всех активных отслеживателей"""
