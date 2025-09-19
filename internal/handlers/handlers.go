@@ -40,48 +40,35 @@ func (h *Handler) HandleCommand(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	}
 
 	// Обновляем информацию о пользователе
-	log.Printf("👤 Обработка пользователя: %d", update.Message.From.ID)
 	user, err := h.ensureUser(update.Message.From)
 	if err != nil {
-		log.Printf("❌ Ошибка создания пользователя: %v", err)
+		log.Printf("Ошибка создания пользователя: %v", err)
 		return
 	}
-	log.Printf("✅ Пользователь обработан: ID=%d, PlayerTag=%s", user.TelegramID, user.PlayerTag)
 
 	// Обновляем время последней активности
 	h.db.UpdateLastActivity(user.TelegramID)
 
 	command := update.Message.Command()
-	log.Printf("⚡ Выполнение команды: %s", command)
 	
 	switch command {
 	case "start":
-		log.Println("🎯 Обработка команды /start")
 		h.handleStart(bot, update)
 	case "profile":
-		log.Println("👤 Обработка команды /profile")
 		h.handleProfile(bot, update)
 	case "link":
-		log.Println("🔗 Обработка команды /link")
 		h.handleLink(bot, update)
 	case "clan":
-		log.Println("🛡 Обработка команды /clan")
 		h.handleClan(bot, update)
 	case "search":
-		log.Println("🔍 Обработка команды /search")
 		h.handleSearch(bot, update)
 	case "subscription":
-		log.Println("💎 Обработка команды /subscription")
 		h.handleSubscription(bot, update)
 	case "help":
-		log.Println("❓ Обработка команды /help")
 		h.handleHelp(bot, update)
 	default:
-		log.Printf("❓ Неизвестная команда: %s", command)
 		h.handleUnknownCommand(bot, update)
 	}
-	
-	log.Printf("✅ Команда %s обработана", command)
 }
 
 // HandleCallback обрабатывает callback запросы
@@ -99,27 +86,46 @@ func (h *Handler) HandleCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	// Подтверждаем callback
 	callbackConfig := tgbotapi.NewCallback(callback.ID, "")
 	if _, err := bot.Request(callbackConfig); err != nil {
-		log.Printf("⚠️ Ошибка подтверждения callback: %v", err)
-	} else {
-		log.Println("✅ Callback подтвержден")
+		log.Printf("Ошибка подтверждения callback: %v", err)
 	}
 
 	// Обрабатываем различные типы callback'ов
 	switch {
 	case strings.HasPrefix(data, "subscription_"):
-		log.Println("💎 Обработка callback подписки")
 		h.handleSubscriptionCallback(bot, update)
 	case strings.HasPrefix(data, "payment_"):
-		log.Println("💳 Обработка callback платежа")
 		h.handlePaymentCallback(bot, update)
 	case strings.HasPrefix(data, "clan_"):
-		log.Println("🛡 Обработка callback клана")
 		h.handleClanCallback(bot, update)
+	case strings.HasPrefix(data, "members"):
+		h.handleMembersCallback(bot, update)
+	case strings.HasPrefix(data, "warlist"):
+		h.handleWarListCallback(bot, update)
+	case strings.HasPrefix(data, "warinfo"):
+		h.handleWarInfoCallback(bot, update)
+	case strings.HasPrefix(data, "profile"):
+		h.handleProfileCallback(bot, update)
+	case strings.HasPrefix(data, "notify_toggle"):
+		h.handleNotifyToggleCallback(bot, update)
+	case strings.HasPrefix(data, "cwlbonus"):
+		h.handleCwlBonusCallback(bot, update)
+	case strings.HasPrefix(data, "current_war"):
+		h.handleCurrentWarCallback(bot, update)
+	case strings.HasPrefix(data, "cwl_info"):
+		h.handleCwlInfoCallback(bot, update)
+	case strings.HasPrefix(data, "main_menu"):
+		h.handleMainMenuCallback(bot, update)
+	case strings.HasPrefix(data, "building_tracker"):
+		h.handleBuildingTrackerCallback(bot, update)
+	case strings.HasPrefix(data, "building_toggle"):
+		h.handleBuildingToggleCallback(bot, update)
+	case data == "noop":
+		// Ничего не делаем - это заглушка
+		return
 	default:
-		log.Printf("❓ Неизвестный callback: %s", data)
+		log.Printf("Неизвестный callback: %s", data)
+		h.handleUnknownCallback(bot, update)
 	}
-	
-	log.Printf("✅ Callback %s обработан", data)
 }
 
 // ensureUser создает пользователя если его нет в базе
@@ -187,8 +193,24 @@ func (h *Handler) handleProfile(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	// Форматируем информацию о профиле
 	profileText := h.formatPlayerProfile(playerInfo)
 	
+	// Добавляем инлайн клавиатуру с кнопками
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🛡 Мой клан", "clan_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("⚔️ Текущая война", "current_war"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🔔 Уведомления", "notify_toggle"),
+			tgbotapi.NewInlineKeyboardButtonData("💎 Премиум", "subscription_menu"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu"),
+		),
+	)
+	
 	msg := tgbotapi.NewMessage(update.Message.Chat.ID, profileText)
 	msg.ParseMode = tgbotapi.ModeMarkdown
+	msg.ReplyMarkup = keyboard
 	bot.Send(msg)
 }
 
@@ -280,8 +302,24 @@ func (h *Handler) handleClan(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	// Форматируем информацию о клане
 	clanText := h.formatClanInfo(clanInfo)
 	
+	// Добавляем инлайн клавиатуру с кнопками
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("👥 Участники", "members"),
+			tgbotapi.NewInlineKeyboardButtonData("⚔️ Текущая война", "current_war"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📈 История войн", "warlist"),
+			tgbotapi.NewInlineKeyboardButtonData("🏆 ЛВК", "cwl_info"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu"),
+		),
+	)
+	
 	msg := tgbotapi.NewMessage(update.Message.Chat.ID, clanText)
 	msg.ParseMode = tgbotapi.ModeMarkdown
+	msg.ReplyMarkup = keyboard
 	bot.Send(msg)
 }
 
@@ -545,4 +583,334 @@ func (h *Handler) handlePaymentCallback(bot *tgbotapi.BotAPI, update tgbotapi.Up
 func (h *Handler) handleClanCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	// Здесь можно добавить обработку различных действий с кланом
 	// Например, просмотр участников, статистики войн и т.д.
+	callback := update.CallbackQuery
+	
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+		"🛡 Функции клана временно недоступны.")
+	bot.Send(msg)
+}
+
+// handleMembersCallback обрабатывает callback'и участников клана
+func (h *Handler) handleMembersCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	callback := update.CallbackQuery
+	
+	user, err := h.db.GetUserByTelegramID(callback.From.ID)
+	if err != nil || user.PlayerTag == "" {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+			"❌ Сначала привяжите свой аккаунт командой /link")
+		bot.Send(msg)
+		return
+	}
+
+	// Получаем информацию об игроке
+	playerInfo, err := h.cocAPI.GetPlayerInfo(user.PlayerTag)
+	if err != nil || playerInfo.Clan == nil {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+			"❌ Вы не состоите в клане!")
+		bot.Send(msg)
+		return
+	}
+
+	// Получаем список участников клана
+	clanInfo, err := h.cocAPI.GetClanInfo(playerInfo.Clan.Tag)
+	if err != nil {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+			"❌ Ошибка получения данных клана")
+		bot.Send(msg)
+		return
+	}
+
+	// Форматируем список участников
+	membersText := h.formatClanMembers(clanInfo)
+	
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, membersText)
+	msg.ParseMode = tgbotapi.ModeMarkdown
+	bot.Send(msg)
+}
+
+// handleWarListCallback обрабатывает callback'и списка войн
+func (h *Handler) handleWarListCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	callback := update.CallbackQuery
+	
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+		"⚔️ История войн временно недоступна.")
+	bot.Send(msg)
+}
+
+// handleWarInfoCallback обрабатывает callback'и информации о войне
+func (h *Handler) handleWarInfoCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	callback := update.CallbackQuery
+	
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+		"⚔️ Подробная информация о войне временно недоступна.")
+	bot.Send(msg)
+}
+
+// handleProfileCallback обрабатывает callback'и профиля
+func (h *Handler) handleProfileCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	callback := update.CallbackQuery
+	data := callback.Data
+	
+	// Извлекаем тег игрока из callback данных
+	parts := strings.Split(data, ":")
+	if len(parts) < 2 {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+			"❌ Неверный формат данных профиля")
+		bot.Send(msg)
+		return
+	}
+	
+	playerTag := parts[1]
+	
+	// Получаем информацию об игроке
+	playerInfo, err := h.cocAPI.GetPlayerInfo(playerTag)
+	if err != nil {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+			fmt.Sprintf("❌ Ошибка получения данных игрока: %v", err))
+		bot.Send(msg)
+		return
+	}
+
+	// Форматируем информацию о профиле
+	profileText := h.formatPlayerProfile(playerInfo)
+	
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, profileText)
+	msg.ParseMode = tgbotapi.ModeMarkdown
+	bot.Send(msg)
+}
+
+// handleNotifyToggleCallback обрабатывает callback'и переключения уведомлений
+func (h *Handler) handleNotifyToggleCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	callback := update.CallbackQuery
+	
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+		"🔔 Настройки уведомлений временно недоступны.")
+	bot.Send(msg)
+}
+
+// handleCwlBonusCallback обрабатывает callback'и бонусов ЛВК
+func (h *Handler) handleCwlBonusCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	callback := update.CallbackQuery
+	
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+		"🏆 Информация о бонусах ЛВК временно недоступна.")
+	bot.Send(msg)
+}
+
+// handleCurrentWarCallback обрабатывает callback'и текущей войны
+func (h *Handler) handleCurrentWarCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	callback := update.CallbackQuery
+	
+	user, err := h.db.GetUserByTelegramID(callback.From.ID)
+	if err != nil || user.PlayerTag == "" {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+			"❌ Сначала привяжите свой аккаунт командой /link")
+		bot.Send(msg)
+		return
+	}
+
+	// Получаем информацию об игроке
+	playerInfo, err := h.cocAPI.GetPlayerInfo(user.PlayerTag)
+	if err != nil || playerInfo.Clan == nil {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+			"❌ Вы не состоите в клане!")
+		bot.Send(msg)
+		return
+	}
+
+	// Получаем информацию о текущей войне
+	warInfo, err := h.cocAPI.GetClanCurrentWar(playerInfo.Clan.Tag)
+	if err != nil {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+			"❌ Ошибка получения данных войны")
+		bot.Send(msg)
+		return
+	}
+
+	// Форматируем информацию о войне
+	warText := h.formatWarInfo(warInfo)
+	
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, warText)
+	msg.ParseMode = tgbotapi.ModeMarkdown
+	bot.Send(msg)
+}
+
+// handleCwlInfoCallback обрабатывает callback'и информации ЛВК
+func (h *Handler) handleCwlInfoCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	callback := update.CallbackQuery
+	
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+		"🏆 Информация о Лиге Кланов временно недоступна.")
+	bot.Send(msg)
+}
+
+// handleMainMenuCallback обрабатывает callback'и главного меню
+func (h *Handler) handleMainMenuCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	callback := update.CallbackQuery
+	
+	// Создаем главное меню
+	welcomeText := `🎮 **Главное меню ClashBot**
+
+Выберите нужную функцию:
+
+👤 **/profile** - Мой профиль
+🛡 **/clan** - Информация о клане  
+🔍 **/search** - Поиск игрока/клана
+💎 **/subscription** - Премиум подписка
+❓ **/help** - Справка по командам`
+
+	// Создаем инлайн клавиатуру
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("👤 Профиль", "profile_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🛡 Клан", "clan_menu"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🔍 Поиск", "search_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("💎 Премиум", "subscription_menu"),
+		),
+	)
+
+	// Отправляем или редактируем сообщение
+	if callback.Message.Text != "" {
+		edit := tgbotapi.NewEditMessageText(callback.Message.Chat.ID, callback.Message.MessageID, welcomeText)
+		edit.ParseMode = tgbotapi.ModeMarkdown
+		edit.ReplyMarkup = &keyboard
+		bot.Send(edit)
+	} else {
+		msg := tgbotapi.NewMessage(callback.Message.Chat.ID, welcomeText)
+		msg.ParseMode = tgbotapi.ModeMarkdown
+		msg.ReplyMarkup = keyboard
+		bot.Send(msg)
+	}
+}
+
+// handleBuildingTrackerCallback обрабатывает callback'и отслеживания зданий
+func (h *Handler) handleBuildingTrackerCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	callback := update.CallbackQuery
+	
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+		"🏗️ Отслеживание улучшений зданий временно недоступно.")
+	bot.Send(msg)
+}
+
+// handleBuildingToggleCallback обрабатывает callback'и переключения отслеживания зданий
+func (h *Handler) handleBuildingToggleCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	callback := update.CallbackQuery
+	
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+		"🔄 Переключение отслеживания зданий временно недоступно.")
+	bot.Send(msg)
+}
+
+// handleUnknownCallback обрабатывает неизвестные callback'и
+func (h *Handler) handleUnknownCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	callback := update.CallbackQuery
+	
+	msg := tgbotapi.NewMessage(callback.Message.Chat.ID, 
+		"❌ Неизвестная команда кнопки.")
+	bot.Send(msg)
+}
+
+// formatClanMembers форматирует список участников клана
+func (h *Handler) formatClanMembers(clan *api.ClanInfo) string {
+	text := fmt.Sprintf("👥 **Участники клана %s**\n\n", clan.Name)
+	
+	// Группируем по ролям
+	leaders := []api.ClanMember{}
+	coLeaders := []api.ClanMember{}
+	elders := []api.ClanMember{}
+	members := []api.ClanMember{}
+	
+	for _, member := range clan.MemberList {
+		switch member.Role {
+		case "leader":
+			leaders = append(leaders, member)
+		case "coLeader":
+			coLeaders = append(coLeaders, member)
+		case "admin":
+			elders = append(elders, member)
+		default:
+			members = append(members, member)
+		}
+	}
+	
+	// Добавляем лидеров
+	if len(leaders) > 0 {
+		text += "👑 **Лидеры:**\n"
+		for _, member := range leaders {
+			text += fmt.Sprintf("• %s `%s` 🏆%d\n", member.Name, member.Tag, member.Trophies)
+		}
+		text += "\n"
+	}
+	
+	// Добавляем соруководителей
+	if len(coLeaders) > 0 {
+		text += "🔶 **Соруководители:**\n"
+		for _, member := range coLeaders {
+			text += fmt.Sprintf("• %s `%s` 🏆%d\n", member.Name, member.Tag, member.Trophies)
+		}
+		text += "\n"
+	}
+	
+	// Добавляем старейшин
+	if len(elders) > 0 {
+		text += "🔸 **Старейшины:**\n"
+		for _, member := range elders {
+			text += fmt.Sprintf("• %s `%s` 🏆%d\n", member.Name, member.Tag, member.Trophies)
+		}
+		text += "\n"
+	}
+	
+	// Добавляем участников (показываем только первых 10)
+	if len(members) > 0 {
+		text += "⚫ **Участники:**\n"
+		for i, member := range members {
+			if i >= 10 {
+				text += fmt.Sprintf("... и еще %d участников\n", len(members)-10)
+				break
+			}
+			text += fmt.Sprintf("• %s `%s` 🏆%d\n", member.Name, member.Tag, member.Trophies)
+		}
+	}
+	
+	return text
+}
+
+// formatWarInfo форматирует информацию о войне
+func (h *Handler) formatWarInfo(war *api.WarInfo) string {
+	text := "⚔️ **Информация о войне**\n\n"
+	
+	// Статус войны
+	var status string
+	switch war.State {
+	case "preparation":
+		status = "🔄 Подготовка"
+	case "inWar":
+		status = "⚔️ Идет война"
+	case "warEnded":
+		status = "✅ Завершена"
+	default:
+		status = war.State
+	}
+	
+	text += fmt.Sprintf("📊 Статус: %s\n", status)
+	text += fmt.Sprintf("👥 Размер: %d vs %d\n\n", war.TeamSize, war.TeamSize)
+	
+	// Информация о кланах
+	if war.Clan != nil {
+		text += fmt.Sprintf("🛡 **%s**\n", war.Clan.Name)
+		text += fmt.Sprintf("⭐ Звезд: %d\n", war.Clan.Stars)
+		text += fmt.Sprintf("💥 Разрушений: %.1f%%\n", war.Clan.DestructionPercentage)
+		text += fmt.Sprintf("⚔️ Атак: %d\n\n", war.Clan.Attacks)
+	}
+	
+	if war.Opponent != nil {
+		text += fmt.Sprintf("🏴 **%s**\n", war.Opponent.Name)
+		text += fmt.Sprintf("⭐ Звезд: %d\n", war.Opponent.Stars)
+		text += fmt.Sprintf("💥 Разрушений: %.1f%%\n", war.Opponent.DestructionPercentage)
+		text += fmt.Sprintf("⚔️ Атак: %d\n", war.Opponent.Attacks)
+	}
+	
+	return text
 }

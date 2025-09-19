@@ -24,47 +24,35 @@ type Bot struct {
 
 // New создает новый экземпляр бота
 func New(cfg *config.Config) (*Bot, error) {
-	log.Println("📋 Детальная инициализация компонентов бота:")
+	log.Println("Инициализация бота...")
 	
 	// Проверяем конфигурацию
-	log.Println("    ⏳ Валидация конфигурации...")
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("неверная конфигурация: %v", err)
 	}
-	log.Println("    ✅ Конфигурация валидна")
 
 	// Создаем Telegram Bot API
-	log.Println("    ⏳ Подключение к Telegram Bot API...")
 	botAPI, err := tgbotapi.NewBotAPI(cfg.BotToken)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка создания Telegram Bot API: %v", err)
 	}
-	log.Printf("    ✅ Авторизован как @%s", botAPI.Self.UserName)
 
 	// Создаем подключение к базе данных
-	log.Printf("    ⏳ Подключение к базе данных (%s)...", cfg.DatabasePath)
 	db, err := database.New(cfg.DatabasePath)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка подключения к базе данных: %v", err)
 	}
-	log.Println("    ✅ База данных подключена")
 
 	// Создаем клиент Clash of Clans API
-	log.Printf("    ⏳ Инициализация Clash of Clans API клиента (%s)...", cfg.CocAPIBaseURL)
 	cocAPI := api.NewCocAPIClient(cfg.CocAPIBaseURL, cfg.CocAPIToken)
-	log.Println("    ✅ COC API клиент создан")
 
 	// Создаем сервис платежей
-	log.Println("    ⏳ Инициализация сервиса платежей (YooKassa)...")
 	paymentSvc := payment.New(cfg.BotUsername, "python3", "./payment_bridge.py")
-	log.Println("    ✅ Сервис платежей инициализирован")
 
 	// Создаем обработчик сообщений
-	log.Println("    ⏳ Создание обработчиков сообщений...")
 	handler := handlers.New(db, cocAPI, paymentSvc, cfg.BotUsername)
-	log.Println("    ✅ Обработчики сообщений созданы")
 
-	log.Println("🎉 Все компоненты бота успешно инициализированы!")
+	log.Printf("Бот @%s готов к работе", botAPI.Self.UserName)
 
 	return &Bot{
 		config:     cfg,
@@ -78,18 +66,15 @@ func New(cfg *config.Config) (*Bot, error) {
 
 // Run запускает бота
 func (b *Bot) Run() error {
-	log.Println("🎯 Запуск бота...")
+	log.Println("Запуск бота...")
 
 	// Настраиваем обновления
-	log.Println("⚙️ Настройка получения обновлений...")
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
-	log.Println("📡 Подключение к серверам Telegram...")
 	updates := b.bot.GetUpdatesChan(u)
 	
-	log.Println("✅ Бот запущен и готов к работе!")
-	log.Println("👂 Ожидание сообщений...")
+	log.Println("Бот запущен и готов к работе!")
 
 	// Основной цикл обработки сообщений
 	for update := range updates {
@@ -130,21 +115,16 @@ func (b *Bot) handleMessage(update tgbotapi.Update) {
 
 	// Обрабатываем команды
 	if message.IsCommand() {
-		log.Printf("⚡ Обработка команды: %s", message.Command())
 		b.handler.HandleCommand(b.bot, update)
 		return
 	}
 
 	// Обрабатываем обычные сообщения
-	log.Printf("💬 Обработка текстового сообщения")
 	b.handleTextMessage(update)
 }
 
 // handleTextMessage обрабатывает обычные текстовые сообщения
 func (b *Bot) handleTextMessage(update tgbotapi.Update) {
-	log.Printf("💬 Обработка текстового сообщения от %d: '%s'", 
-		update.Message.From.ID, update.Message.Text)
-	
 	// Проверяем состояние пользователя - возможно он в процессе ввода данных
 	// В будущем здесь можно добавить состояния для ввода тегов, поиска и т.д.
 	
@@ -153,9 +133,7 @@ func (b *Bot) handleTextMessage(update tgbotapi.Update) {
 	
 	msg := tgbotapi.NewMessage(update.Message.Chat.ID, helpText)
 	if _, err := b.bot.Send(msg); err != nil {
-		log.Printf("❌ Ошибка отправки сообщения: %v", err)
-	} else {
-		log.Println("✅ Справочное сообщение отправлено")
+		log.Printf("Ошибка отправки сообщения: %v", err)
 	}
 }
 
