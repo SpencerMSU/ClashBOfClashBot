@@ -95,6 +95,14 @@ func (h *Handler) HandleCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		h.handleSubscriptionCallback(bot, update)
 	case strings.HasPrefix(data, "payment_"):
 		h.handlePaymentCallback(bot, update)
+	case strings.HasPrefix(data, "clan_menu"):
+		h.handleClanMenuCallback(bot, update)
+	case strings.HasPrefix(data, "profile_menu"):
+		h.handleProfileMenuCallback(bot, update)
+	case strings.HasPrefix(data, "search_menu"):
+		h.handleSearchMenuCallback(bot, update)
+	case strings.HasPrefix(data, "subscription_menu"):
+		h.handleSubscriptionMenuCallback(bot, update)
 	case strings.HasPrefix(data, "clan_"):
 		h.handleClanCallback(bot, update)
 	case strings.HasPrefix(data, "members"):
@@ -161,8 +169,22 @@ func (h *Handler) handleStart(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 
 Используйте /help для просмотра всех команд.`
 
+	// Добавляем постоянную клавиатуру с кнопками
+	keyboard := tgbotapi.NewReplyKeyboard(
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("👤 Профиль"),
+			tgbotapi.NewKeyboardButton("🛡 Клан"),
+		),
+		tgbotapi.NewKeyboardButtonRow(
+			tgbotapi.NewKeyboardButton("🔔 Уведомления"),
+			tgbotapi.NewKeyboardButton("💎 Премиум"),
+		),
+	)
+	keyboard.ResizeKeyboard = true
+
 	msg := tgbotapi.NewMessage(update.Message.Chat.ID, welcomeText)
 	msg.ParseMode = tgbotapi.ModeMarkdown
+	msg.ReplyMarkup = keyboard
 	bot.Send(msg)
 }
 
@@ -913,4 +935,122 @@ func (h *Handler) formatWarInfo(war *api.WarInfo) string {
 	}
 	
 	return text
+}
+// HandleProfile обрабатывает команду профиля (для клавиатурных кнопок)
+func (h *Handler) HandleProfile(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+h.handleProfile(bot, update)
+}
+
+// HandleClan обрабатывает команду клана (для клавиатурных кнопок)
+func (h *Handler) HandleClan(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+h.handleClan(bot, update)
+}
+
+// HandleSubscription обрабатывает команду подписки (для клавиатурных кнопок)
+func (h *Handler) HandleSubscription(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+h.handleSubscription(bot, update)
+}
+
+// HandleNotifications обрабатывает кнопку уведомлений
+func (h *Handler) HandleNotifications(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+user, err := h.db.GetUserByTelegramID(update.Message.From.ID)
+if err != nil || user.PlayerTag == "" {
+msg := tgbotapi.NewMessage(update.Message.Chat.ID, 
+"❌ Сначала привяжите свой аккаунт командой /link")
+bot.Send(msg)
+return
+}
+
+// Создаем меню уведомлений
+text := `🔔 **Настройки уведомлений**
+
+Здесь вы можете настроить уведомления о:
+• Начале клановых войн
+• Окончании подготовки к войне
+• Результатах войн
+• Улучшениях зданий (премиум)
+
+Для настройки используйте кнопки ниже:`
+
+// Создаем инлайн клавиатуру
+keyboard := tgbotapi.NewInlineKeyboardMarkup(
+tgbotapi.NewInlineKeyboardRow(
+tgbotapi.NewInlineKeyboardButtonData("🔔 Включить/Выключить", "notify_toggle"),
+),
+tgbotapi.NewInlineKeyboardRow(
+tgbotapi.NewInlineKeyboardButtonData("🏗️ Отслеживание зданий", "building_tracker"),
+),
+tgbotapi.NewInlineKeyboardRow(
+tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu"),
+),
+)
+
+msg := tgbotapi.NewMessage(update.Message.Chat.ID, text)
+msg.ParseMode = tgbotapi.ModeMarkdown
+msg.ReplyMarkup = keyboard
+bot.Send(msg)
+}
+
+// handleClanMenuCallback обрабатывает callback меню клана
+func (h *Handler) handleClanMenuCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+// Перенаправляем на обработку команды клана
+callback := update.CallbackQuery
+update.Message = &tgbotapi.Message{
+Chat: &tgbotapi.Chat{ID: callback.Message.Chat.ID},
+From: callback.From,
+Text: "/clan",
+}
+h.handleClan(bot, update)
+}
+
+// handleProfileMenuCallback обрабатывает callback меню профиля  
+func (h *Handler) handleProfileMenuCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+// Перенаправляем на обработку команды профиля
+callback := update.CallbackQuery
+update.Message = &tgbotapi.Message{
+Chat: &tgbotapi.Chat{ID: callback.Message.Chat.ID},
+From: callback.From,
+Text: "/profile",
+}
+h.handleProfile(bot, update)
+}
+
+// handleSearchMenuCallback обрабатывает callback меню поиска
+func (h *Handler) handleSearchMenuCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+callback := update.CallbackQuery
+
+text := `🔍 **Поиск игроков и кланов**
+
+Для поиска используйте команды:
+• /search #тег_игрока - поиск игрока
+• /search #тег_клана - поиск клана
+
+**Примеры:**
+• /search #ABC123DEF
+• /search #ClanTag
+
+Тег должен начинаться с символа #`
+
+keyboard := tgbotapi.NewInlineKeyboardMarkup(
+tgbotapi.NewInlineKeyboardRow(
+tgbotapi.NewInlineKeyboardButtonData("🏠 Главное меню", "main_menu"),
+),
+)
+
+msg := tgbotapi.NewMessage(callback.Message.Chat.ID, text)
+msg.ParseMode = tgbotapi.ModeMarkdown
+msg.ReplyMarkup = keyboard
+bot.Send(msg)
+}
+
+// handleSubscriptionMenuCallback обрабатывает callback меню подписки
+func (h *Handler) handleSubscriptionMenuCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+// Перенаправляем на обработку команды подписки
+callback := update.CallbackQuery
+update.Message = &tgbotapi.Message{
+Chat: &tgbotapi.Chat{ID: callback.Message.Chat.ID},
+From: callback.From,
+Text: "/subscription",
+}
+h.handleSubscription(bot, update)
 }
