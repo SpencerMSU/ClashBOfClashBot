@@ -32,6 +32,18 @@ venv/
 env/
 ENV/
 
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+clashbot-go
+clashbot
+go.work
+
 # Environment variables
 .env
 
