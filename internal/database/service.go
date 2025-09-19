@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"clashbot/internal/models"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // Service представляет сервис для работы с базой данных
@@ -16,7 +16,7 @@ type Service struct {
 
 // New создает новый экземпляр сервиса базы данных
 func New(dbPath string) (*Service, error) {
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка открытия базы данных: %v", err)
 	}
