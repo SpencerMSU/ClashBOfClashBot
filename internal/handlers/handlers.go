@@ -35,64 +35,91 @@ func New(db *database.Service, cocAPI *api.CocAPIClient, paymentSvc *payment.Pay
 // HandleCommand обрабатывает команды бота
 func (h *Handler) HandleCommand(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	if update.Message == nil {
+		log.Println("⚠️ Получено пустое сообщение в HandleCommand")
 		return
 	}
 
 	// Обновляем информацию о пользователе
+	log.Printf("👤 Обработка пользователя: %d", update.Message.From.ID)
 	user, err := h.ensureUser(update.Message.From)
 	if err != nil {
-		log.Printf("Ошибка создания пользователя: %v", err)
+		log.Printf("❌ Ошибка создания пользователя: %v", err)
 		return
 	}
+	log.Printf("✅ Пользователь обработан: ID=%d, PlayerTag=%s", user.TelegramID, user.PlayerTag)
 
 	// Обновляем время последней активности
 	h.db.UpdateLastActivity(user.TelegramID)
 
 	command := update.Message.Command()
+	log.Printf("⚡ Выполнение команды: %s", command)
+	
 	switch command {
 	case "start":
+		log.Println("🎯 Обработка команды /start")
 		h.handleStart(bot, update)
 	case "profile":
+		log.Println("👤 Обработка команды /profile")
 		h.handleProfile(bot, update)
 	case "link":
+		log.Println("🔗 Обработка команды /link")
 		h.handleLink(bot, update)
 	case "clan":
+		log.Println("🛡 Обработка команды /clan")
 		h.handleClan(bot, update)
 	case "search":
+		log.Println("🔍 Обработка команды /search")
 		h.handleSearch(bot, update)
 	case "subscription":
+		log.Println("💎 Обработка команды /subscription")
 		h.handleSubscription(bot, update)
 	case "help":
+		log.Println("❓ Обработка команды /help")
 		h.handleHelp(bot, update)
 	default:
+		log.Printf("❓ Неизвестная команда: %s", command)
 		h.handleUnknownCommand(bot, update)
 	}
+	
+	log.Printf("✅ Команда %s обработана", command)
 }
 
 // HandleCallback обрабатывает callback запросы
 func (h *Handler) HandleCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	if update.CallbackQuery == nil {
+		log.Println("⚠️ Получен пустой callback в HandleCallback")
 		return
 	}
 
 	callback := update.CallbackQuery
 	data := callback.Data
 
+	log.Printf("🔘 Обработка callback: %s от пользователя %d", data, callback.From.ID)
+
 	// Подтверждаем callback
 	callbackConfig := tgbotapi.NewCallback(callback.ID, "")
-	bot.Request(callbackConfig)
+	if _, err := bot.Request(callbackConfig); err != nil {
+		log.Printf("⚠️ Ошибка подтверждения callback: %v", err)
+	} else {
+		log.Println("✅ Callback подтвержден")
+	}
 
 	// Обрабатываем различные типы callback'ов
 	switch {
 	case strings.HasPrefix(data, "subscription_"):
+		log.Println("💎 Обработка callback подписки")
 		h.handleSubscriptionCallback(bot, update)
 	case strings.HasPrefix(data, "payment_"):
+		log.Println("💳 Обработка callback платежа")
 		h.handlePaymentCallback(bot, update)
 	case strings.HasPrefix(data, "clan_"):
+		log.Println("🛡 Обработка callback клана")
 		h.handleClanCallback(bot, update)
 	default:
-		log.Printf("Неизвестный callback: %s", data)
+		log.Printf("❓ Неизвестный callback: %s", data)
 	}
+	
+	log.Printf("✅ Callback %s обработан", data)
 }
 
 // ensureUser создает пользователя если его нет в базе

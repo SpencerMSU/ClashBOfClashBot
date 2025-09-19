@@ -1,0 +1,18 @@
+# ClashBot Configuration File
+# Заполните своими токенами и сохраните файл
+
+# Telegram Bot Token (получить у @BotFather)
+# Пример: BOT_TOKEN=1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh
+BOT_TOKEN=your_telegram_bot_token_here
+
+# Clash of Clans API Token (получить на https://developer.clashofclans.com)
+# Пример: COC_API_TOKEN=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiIsImtpZCI6IjI4YTMxOGY3LTAwMDAtYTFlYi03ZmExLTJjN...
+COC_API_TOKEN=your_clash_of_clans_api_token_here
+
+# Bot Username (имя пользователя бота без @)
+# Пример: BOT_USERNAME=my_clash_bot
+BOT_USERNAME=your_bot_username
+
+# YooKassa реквизиты для платежей (необязательно, есть тестовые значения по умолчанию)
+# YOOKASSA_SHOP_ID=ваш_shop_id_yookassa
+# YOOKASSA_SECRET_KEY=ваш_secret_key_yookassa
