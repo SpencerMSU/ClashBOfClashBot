@@ -3,11 +3,13 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"testing"
 
 	"clashbot/internal/config"
 	"clashbot/internal/payment"
 	"clashbot/internal/api"
+	"clashbot/internal/database"
 )
 
 // TestConfigLoad проверяет загрузку конфигурации
@@ -177,6 +179,27 @@ func TestMigrationCompatibility(t *testing.T) {
 	fmt.Printf("🏗️ НОВОЕ: Go производительность + Python YooKassa совместимость!\n")
 
 	log.Printf("✅ Миграция завершена успешно")
+}
+
+// TestDatabaseOperations проверяет базовые операции с БД
+func TestDatabaseOperations(t *testing.T) {
+	db, err := database.New("test_final.db")
+	if err != nil {
+		t.Fatalf("Ошибка создания БД: %v", err)
+	}
+	defer func() {
+		db.Close()
+		// Удаляем тестовый файл БД
+		os.Remove("test_final.db")
+	}()
+
+	// Тестируем создание пользователя
+	_, err = db.CreateUser(999, "final_test", "Final", "Test")
+	if err != nil {
+		t.Fatalf("Ошибка создания пользователя: %v", err)
+	}
+
+	log.Println("✅ Database operations with CGO disabled: SUCCESS")
 }
 
 // TestMain запускает все тесты
