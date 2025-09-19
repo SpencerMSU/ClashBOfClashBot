@@ -41,6 +41,23 @@ class MessageGenerator:
             "member": "👤 Участник"
         }
     
+    def _format_datetime(self, iso_datetime_str: str) -> str:
+        """Форматирование ISO datetime строки в читаемый формат"""
+        try:
+            # Парсим ISO datetime (формат: 20250919T044950.000Z)
+            dt = datetime.fromisoformat(iso_datetime_str.replace('Z', '+00:00'))
+            
+            # Конвертируем в московское время (UTC+3)
+            moscow_tz = timezone(timedelta(hours=3))
+            moscow_dt = dt.astimezone(moscow_tz)
+            
+            # Форматируем в читаемый вид: "19.09.2025 07:49"
+            return moscow_dt.strftime('%d.%m.%Y %H:%M')
+        except Exception as e:
+            logger.error(f"Ошибка при форматировании времени {iso_datetime_str}: {e}")
+            # Возвращаем исходную строку в случае ошибки
+            return iso_datetime_str
+    
     async def handle_profile_menu_request(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка запроса меню профиля"""
         chat_id = update.effective_chat.id
@@ -1190,11 +1207,13 @@ class MessageGenerator:
         if state == 'preparation':
             start_time = war_data.get('startTime')
             if start_time:
-                message += f"🕐 Начало войны: {start_time}\n"
+                formatted_time = self._format_datetime(start_time)
+                message += f"🕐 Начало войны: {formatted_time}\n"
         elif state == 'inWar':
             end_time = war_data.get('endTime')
             if end_time:
-                message += f"🕐 Конец войны: {end_time}\n"
+                formatted_time = self._format_datetime(end_time)
+                message += f"🕐 Конец войны: {formatted_time}\n"
         
         return message
     
@@ -1555,7 +1574,7 @@ class MessageGenerator:
                 return
             
             from building_monitor import BuildingMonitor
-            building_monitor = getattr(context.bot_data, 'building_monitor', None)
+            building_monitor = context.bot_data.get('building_monitor', None)
             
             if not building_monitor:
                 await update.callback_query.edit_message_text(
@@ -1600,10 +1619,6 @@ class MessageGenerator:
                 reply_markup=keyboard,
                 parse_mode=ParseMode.HTML
             )
-        
-        except Exception as e:
-            logger.error(f"Ошибка при переключении отслеживания зданий: {e}")
-            await update.callback_query.edit_message_text("Произошла ошибка при изменении настроек отслеживания.")
         
         except Exception as e:
             logger.error(f"Ошибка при переключении отслеживания зданий: {e}")

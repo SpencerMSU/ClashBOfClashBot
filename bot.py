@@ -230,6 +230,11 @@ class ClashBot:
             # Start the application
             await self.application.start()
             
+            # Ensure building monitor is properly stored in bot_data after application is ready
+            if self.building_monitor:
+                self.application.bot_data['building_monitor'] = self.building_monitor
+                logger.info("Building monitor stored in bot_data")
+            
             logger.info("Запуск бота...")
             # Start polling with proper lifecycle management
             await self.application.updater.start_polling(
