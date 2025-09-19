@@ -23,6 +23,11 @@ func New(dbPath string) (*Service, error) {
 
 	service := &Service{db: db}
 	
+	// Проверяем и мигрируем схему БД если нужно
+	if err := service.migrateSchema(); err != nil {
+		return nil, fmt.Errorf("ошибка миграции схемы: %v", err)
+	}
+	
 	// Создаем таблицы если их нет
 	if err := service.createTables(); err != nil {
 		return nil, fmt.Errorf("ошибка создания таблиц: %v", err)
@@ -34,6 +39,183 @@ func New(dbPath string) (*Service, error) {
 // Close закрывает соединение с базой данных
 func (s *Service) Close() error {
 	return s.db.Close()
+}
+
+// migrateSchema проверяет и мигрирует схему БД при необходимости
+func (s *Service) migrateSchema() error {
+	// Проверяем существует ли таблица users
+	var tableName string
+	err := s.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").Scan(&tableName)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// Таблица не существует, новая БД - ничего делать не нужно
+			return nil
+		}
+		return fmt.Errorf("ошибка проверки таблицы users: %v", err)
+	}
+
+	// Проверяем есть ли колонка id в таблице users
+	var hasIDColumn bool
+	rows, err := s.db.Query("PRAGMA table_info(users)")
+	if err != nil {
+		return fmt.Errorf("ошибка получения информации о таблице users: %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, type_, defaultValue sql.NullString
+		var notNull, pk int
+		err = rows.Scan(&cid, &name, &type_, &notNull, &defaultValue, &pk)
+		if err != nil {
+			return fmt.Errorf("ошибка чтения схемы таблицы: %v", err)
+		}
+		if name.String == "id" {
+			hasIDColumn = true
+			break
+		}
+	}
+
+	if !hasIDColumn {
+		// Нужна миграция - добавляем колонку id
+		if err := s.migrateUsersTable(); err != nil {
+			return fmt.Errorf("ошибка миграции таблицы users: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// migrateUsersTable мигрирует таблицу users добавляя недостающие колонки
+func (s *Service) migrateUsersTable() error {
+	// Начинаем транзакцию для безопасной миграции
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("ошибка начала транзакции: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Получаем существующие колонки в таблице users
+	rows, err := tx.Query("PRAGMA table_info(users)")
+	if err != nil {
+		return fmt.Errorf("ошибка получения информации о таблице: %v", err)
+	}
+
+	existingColumns := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, type_, defaultValue sql.NullString
+		var notNull, pk int
+		err = rows.Scan(&cid, &name, &type_, &notNull, &defaultValue, &pk)
+		if err != nil {
+			rows.Close()
+			return fmt.Errorf("ошибка чтения схемы таблицы: %v", err)
+		}
+		existingColumns[name.String] = true
+	}
+	rows.Close()
+
+	// Создаем новую таблицу с правильной схемой
+	_, err = tx.Exec(`
+		CREATE TABLE users_new (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			telegram_id INTEGER UNIQUE NOT NULL,
+			username TEXT,
+			first_name TEXT,
+			last_name TEXT,
+			player_tag TEXT,
+			clan_tag TEXT,
+			is_active BOOLEAN DEFAULT 1,
+			joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_activity DATETIME DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("ошибка создания новой таблицы users: %v", err)
+	}
+
+	// Подготавливаем SELECT для копирования данных основываясь на существующих колонках
+	selectFields := []string{
+		"telegram_id",
+	}
+	
+	if existingColumns["player_tag"] {
+		selectFields = append(selectFields, "COALESCE(player_tag, '') as player_tag")
+	} else {
+		selectFields = append(selectFields, "'' as player_tag")
+	}
+	
+	if existingColumns["username"] {
+		selectFields = append(selectFields, "COALESCE(username, '') as username")
+	} else {
+		selectFields = append(selectFields, "'' as username")
+	}
+	
+	if existingColumns["first_name"] {
+		selectFields = append(selectFields, "COALESCE(first_name, '') as first_name")
+	} else {
+		selectFields = append(selectFields, "'' as first_name")
+	}
+	
+	if existingColumns["last_name"] {
+		selectFields = append(selectFields, "COALESCE(last_name, '') as last_name")
+	} else {
+		selectFields = append(selectFields, "'' as last_name")
+	}
+	
+	if existingColumns["clan_tag"] {
+		selectFields = append(selectFields, "COALESCE(clan_tag, '') as clan_tag")
+	} else {
+		selectFields = append(selectFields, "'' as clan_tag")
+	}
+	
+	if existingColumns["is_active"] {
+		selectFields = append(selectFields, "COALESCE(is_active, 1) as is_active")
+	} else {
+		selectFields = append(selectFields, "1 as is_active")
+	}
+	
+	if existingColumns["joined_at"] {
+		selectFields = append(selectFields, "COALESCE(joined_at, CURRENT_TIMESTAMP) as joined_at")
+	} else {
+		selectFields = append(selectFields, "CURRENT_TIMESTAMP as joined_at")
+	}
+	
+	if existingColumns["last_activity"] {
+		selectFields = append(selectFields, "COALESCE(last_activity, CURRENT_TIMESTAMP) as last_activity")
+	} else {
+		selectFields = append(selectFields, "CURRENT_TIMESTAMP as last_activity")
+	}
+
+	// Копируем данные из старой таблицы
+	copyQuery := fmt.Sprintf(`
+		INSERT INTO users_new (telegram_id, player_tag, username, first_name, last_name, clan_tag, is_active, joined_at, last_activity)
+		SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s FROM users
+	`, selectFields[0], selectFields[1], selectFields[2], selectFields[3], selectFields[4], selectFields[5], selectFields[6], selectFields[7], selectFields[8])
+	
+	_, err = tx.Exec(copyQuery)
+	if err != nil {
+		return fmt.Errorf("ошибка копирования данных: %v", err)
+	}
+
+	// Удаляем старую таблицу
+	_, err = tx.Exec("DROP TABLE users")
+	if err != nil {
+		return fmt.Errorf("ошибка удаления старой таблицы: %v", err)
+	}
+
+	// Переименовываем новую таблицу
+	_, err = tx.Exec("ALTER TABLE users_new RENAME TO users")
+	if err != nil {
+		return fmt.Errorf("ошибка переименования таблицы: %v", err)
+	}
+
+	// Коммитим транзакцию
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("ошибка коммита транзакции: %v", err)
+	}
+
+	return nil
 }
 
 // createTables создает таблицы в базе данных
