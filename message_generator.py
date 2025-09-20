@@ -1513,7 +1513,7 @@ class MessageGenerator:
             
             # Проверяем статус отслеживания
             from building_monitor import BuildingMonitor
-            building_monitor = getattr(context.bot_data, 'building_monitor', None)
+            building_monitor = context.bot_data.get('building_monitor', None)
             is_active = False
             
             if building_monitor:
