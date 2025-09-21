@@ -466,6 +466,15 @@ class CallbackHandler:
             elif callback_type == Keyboards.BASE_LAYOUTS_TH_CALLBACK:
                 await self._handle_base_layouts_th(update, context, data_parts)
             
+            elif callback_type == Keyboards.ACHIEVEMENTS_CALLBACK:
+                await self._handle_achievements(update, context, data_parts)
+            
+            elif callback_type == Keyboards.ACHIEVEMENTS_SORT_CALLBACK:
+                await self._handle_achievements_sort(update, context, data_parts)
+            
+            elif callback_type == Keyboards.ACHIEVEMENTS_PAGE_CALLBACK:
+                await self._handle_achievements_page(update, context, data_parts)
+            
             elif callback_type == "confirm_payment":
                 await self._handle_payment_confirmation(update, context, data_parts)
             
@@ -836,3 +845,31 @@ class CallbackHandler:
         
         th_level = data_parts[1]
         await self.message_generator.handle_base_layouts_th_menu(update, context, th_level)
+    
+    async def _handle_achievements(self, update: Update, context: ContextTypes.DEFAULT_TYPE, data_parts: list):
+        """Обработка меню достижений"""
+        if len(data_parts) < 2:
+            return
+        
+        player_tag = data_parts[1]
+        await self.message_generator.handle_achievements_menu(update, context, player_tag)
+    
+    async def _handle_achievements_sort(self, update: Update, context: ContextTypes.DEFAULT_TYPE, data_parts: list):
+        """Обработка сортировки достижений"""
+        if len(data_parts) < 4:
+            return
+        
+        player_tag = data_parts[1]
+        sort_type = data_parts[2]
+        page = int(data_parts[3])
+        await self.message_generator.handle_achievements_menu(update, context, player_tag, page, sort_type)
+    
+    async def _handle_achievements_page(self, update: Update, context: ContextTypes.DEFAULT_TYPE, data_parts: list):
+        """Обработка навигации по страницам достижений"""
+        if len(data_parts) < 4:
+            return
+        
+        player_tag = data_parts[1]
+        sort_type = data_parts[2]
+        page = int(data_parts[3])
+        await self.message_generator.handle_achievements_menu(update, context, player_tag, page, sort_type)

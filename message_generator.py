@@ -187,9 +187,51 @@ class MessageGenerator:
             await self.display_clan_info(update, context, clan_tag)
     
     async def display_player_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
-                                 player_tag: str, keyboard: InlineKeyboardMarkup = None):
+                                 player_tag: str, keyboard: InlineKeyboardMarkup = None, 
+                                 back_keyboard: InlineKeyboardMarkup = None, from_callback: bool = False):
         """Отображение информации об игроке"""
 
+        # Handle callback updates differently 
+        if from_callback and hasattr(update, 'callback_query') and update.callback_query:
+            # For callback queries, directly edit the existing message
+            await update.callback_query.edit_message_text("🔍 Поиск игрока...")
+            
+            async with self.coc_client as client:
+                player_data = await client.get_player_info(player_tag)
+                
+                if not player_data:
+                    await update.callback_query.edit_message_text(
+                        "❌ Игрок с таким тегом не найден.\n"
+                        "Проверьте правильность введенного тега."
+                    )
+                    return
+                
+                # Форматируем информацию об игроке
+                message = self._format_player_info(player_data)
+                
+                # Create achievements button for profile displays
+                profile_keyboard = []
+                profile_keyboard.append([InlineKeyboardButton("🏆 Достижения", 
+                                                             callback_data=f"{Keyboards.ACHIEVEMENTS_CALLBACK}:{player_tag}")])
+                
+                # Add back_keyboard buttons if provided
+                if back_keyboard and back_keyboard.inline_keyboard:
+                    profile_keyboard.extend(back_keyboard.inline_keyboard)
+                
+                # Add keyboard buttons if provided
+                if keyboard and keyboard.inline_keyboard:
+                    profile_keyboard.extend(keyboard.inline_keyboard)
+                
+                final_keyboard = InlineKeyboardMarkup(profile_keyboard) if profile_keyboard else None
+                
+                await update.callback_query.edit_message_text(
+                    message,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=final_keyboard
+                )
+            return
+
+        # Handle regular message updates (original logic)
         # Сначала убираем клавиатуру и показываем сообщение о поиске
         search_message = await update.message.reply_text(
             "🔍 Поиск игрока...",
@@ -215,18 +257,27 @@ class MessageGenerator:
             # Форматируем информацию об игроке
             message = self._format_player_info(player_data)
             
+            # Create achievements button for profile displays
+            profile_keyboard = []
+            profile_keyboard.append([InlineKeyboardButton("🏆 Достижения", 
+                                                         callback_data=f"{Keyboards.ACHIEVEMENTS_CALLBACK}:{player_tag}")])
+            
+            # Add back_keyboard buttons if provided
+            if back_keyboard and back_keyboard.inline_keyboard:
+                profile_keyboard.extend(back_keyboard.inline_keyboard)
+            
+            # Add keyboard buttons if provided  
+            if keyboard and keyboard.inline_keyboard:
+                profile_keyboard.extend(keyboard.inline_keyboard)
+            
+            final_keyboard = InlineKeyboardMarkup(profile_keyboard) if profile_keyboard else None
+            
             # Редактируем сообщение поиска на информацию об игроке
-            if keyboard:
-                await search_message.edit_text(
-                    message,
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=keyboard
-                )
-            else:
-                await search_message.edit_text(
-                    message,
-                    parse_mode=ParseMode.MARKDOWN
-                )
+            await search_message.edit_text(
+                message,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=final_keyboard
+            )
     
     async def display_clan_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE, clan_tag: str):
         """Отображение информации о клане"""
@@ -2310,3 +2361,103 @@ class MessageGenerator:
         except Exception as e:
             logger.error(f"Ошибка при обработке ТХ {th_level} расстановок: {e}")
             await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке расстановок.")
+    
+    async def handle_achievements_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                     player_tag: str, page: int = 1, sort_type: str = "progress"):
+        """Обработка меню достижений игрока"""
+        try:
+            # Получаем данные игрока для достижений
+            async with self.coc_client as client:
+                player_data = await client.get_player_info(player_tag)
+                
+                if not player_data:
+                    await update.callback_query.edit_message_text("❌ Игрок не найден.")
+                    return
+                
+                player_name = player_data.get('name', 'Неизвестно')
+                achievements = player_data.get('achievements', [])
+                
+                # Форматируем сообщение с достижениями
+                message, total_pages = self._format_achievements_page(player_name, achievements, page, sort_type)
+                
+                # Создаем клавиатуру
+                keyboard = Keyboards.achievements_menu(player_tag, page, sort_type, total_pages)
+                
+                await update.callback_query.edit_message_text(
+                    text=message,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+                
+        except Exception as e:
+            logger.error(f"Ошибка при обработке достижений игрока {player_tag}: {e}")
+            await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке достижений.")
+    
+    def _format_achievements_page(self, player_name: str, achievements: List[Dict], 
+                                page: int, sort_type: str) -> tuple:
+        """Форматирование страницы достижений"""
+        
+        # Сортировка достижений
+        if sort_type == "progress":
+            # Сортировка по прогрессу (процент завершения)
+            achievements = sorted(achievements, key=lambda x: (x.get('value', 0) / max(x.get('target', 1), 1)), reverse=True)
+        elif sort_type == "profitability":
+            # Сортировка по прибыльности (награда в гемах)
+            achievements = sorted(achievements, key=lambda x: x.get('completionInfo', {}).get('gems', 0), reverse=True)
+        
+        # Пагинация
+        items_per_page = 5
+        total_pages = (len(achievements) + items_per_page - 1) // items_per_page
+        start_idx = (page - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        page_achievements = achievements[start_idx:end_idx]
+        
+        sort_name = "прогрессу" if sort_type == "progress" else "прибыльности"
+        
+        message = (
+            f"🏆 <b>Достижения - {player_name}</b>\n"
+            f"📊 Сортировка по: {sort_name}\n"
+            f"📄 Страница {page} из {total_pages}\n\n"
+        )
+        
+        if not page_achievements:
+            message += "❌ На этой странице нет достижений."
+            return message, total_pages
+        
+        for i, achievement in enumerate(page_achievements, 1):
+            name = achievement.get('name', 'Неизвестно')
+            value = achievement.get('value', 0)
+            target = achievement.get('target', 0)
+            
+            # Вычисляем процент прогресса
+            progress_percent = (value / max(target, 1)) * 100
+            
+            # Статус достижения
+            if value >= target:
+                status = "✅"
+                progress_bar = "🟩🟩🟩🟩🟩"
+            else:
+                status = "⏳"
+                filled_blocks = int((progress_percent / 100) * 5)
+                progress_bar = "🟩" * filled_blocks + "⬜" * (5 - filled_blocks)
+            
+            # Информация о награде
+            completion_info = achievement.get('completionInfo', {})
+            gems = completion_info.get('gems', 0)
+            xp = completion_info.get('experienceReward', 0)
+            
+            message += f"{status} <b>{name}</b>\n"
+            message += f"   📊 {progress_bar} {progress_percent:.1f}%\n"
+            message += f"   🎯 {value:,}/{target:,}\n"
+            
+            if gems > 0 or xp > 0:
+                rewards = []
+                if gems > 0:
+                    rewards.append(f"💎 {gems}")
+                if xp > 0:
+                    rewards.append(f"⭐ {xp}")
+                message += f"   🎁 {' | '.join(rewards)}\n"
+            
+            message += "\n"
+        
+        return message, total_pages

@@ -29,6 +29,7 @@ class Keyboards:
     SUBSCRIPTION_BTN = "💎 Премиум подписка"
     LINKED_CLANS_BTN = "🔗 Привязанные кланы"
     COMMUNITY_CENTER_BTN = "🏛️ Центр сообщества"
+    ACHIEVEMENTS_BTN = "🏆 Достижения"
     
     # Константы для callback-данных
     MEMBERS_CALLBACK = "members"
@@ -64,6 +65,9 @@ class Keyboards:
     BUILDING_DETAIL_CALLBACK = "building_detail"
     BASE_LAYOUTS_CALLBACK = "base_layouts"
     BASE_LAYOUTS_TH_CALLBACK = "base_layouts_th"
+    ACHIEVEMENTS_CALLBACK = "achievements"
+    ACHIEVEMENTS_SORT_CALLBACK = "achievements_sort"
+    ACHIEVEMENTS_PAGE_CALLBACK = "achievements_page"
     
     @staticmethod
     def main_menu() -> ReplyKeyboardMarkup:
@@ -706,6 +710,48 @@ class Keyboards:
             keyboard.append(row)
         
         keyboard.append([InlineKeyboardButton("⬅️ Центр сообщества", callback_data=Keyboards.COMMUNITY_CENTER_CALLBACK)])
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def achievements_menu(player_tag: str, page: int = 1, sort_type: str = "progress", total_pages: int = 1) -> InlineKeyboardMarkup:
+        """Меню достижений с пагинацией и сортировкой"""
+        keyboard = []
+        
+        # Кнопки сортировки
+        sort_buttons = []
+        if sort_type != "progress":
+            sort_buttons.append(InlineKeyboardButton("📈 По прогрессу", 
+                                                   callback_data=f"{Keyboards.ACHIEVEMENTS_SORT_CALLBACK}:{player_tag}:progress:1"))
+        if sort_type != "profitability":
+            sort_buttons.append(InlineKeyboardButton("💰 По прибыли", 
+                                                   callback_data=f"{Keyboards.ACHIEVEMENTS_SORT_CALLBACK}:{player_tag}:profitability:1"))
+        
+        if sort_buttons:
+            # Разбиваем кнопки по 2 в ряд, если их больше одной
+            for i in range(0, len(sort_buttons), 2):
+                row = sort_buttons[i:i+2]
+                keyboard.append(row)
+        
+        # Навигация по страницам
+        nav_buttons = []
+        
+        if page > 1:
+            nav_buttons.append(InlineKeyboardButton("⬅️", 
+                                                   callback_data=f"{Keyboards.ACHIEVEMENTS_PAGE_CALLBACK}:{player_tag}:{sort_type}:{page-1}"))
+        
+        nav_buttons.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+        
+        if page < total_pages:
+            nav_buttons.append(InlineKeyboardButton("➡️", 
+                                                   callback_data=f"{Keyboards.ACHIEVEMENTS_PAGE_CALLBACK}:{player_tag}:{sort_type}:{page+1}"))
+        
+        if nav_buttons:
+            keyboard.append(nav_buttons)
+        
+        # Кнопка возврата к профилю
+        keyboard.append([InlineKeyboardButton("⬅️ Назад к профилю", 
+                                            callback_data=f"{Keyboards.PROFILE_CALLBACK}:{player_tag}")])
+        
         return InlineKeyboardMarkup(keyboard)
 
 
