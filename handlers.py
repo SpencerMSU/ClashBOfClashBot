@@ -460,6 +460,12 @@ class CallbackHandler:
             elif callback_type == Keyboards.BUILDING_DETAIL_CALLBACK:
                 await self._handle_building_detail(update, context, data_parts)
             
+            elif callback_type == Keyboards.BASE_LAYOUTS_CALLBACK:
+                await self._handle_base_layouts(update, context)
+            
+            elif callback_type == Keyboards.BASE_LAYOUTS_TH_CALLBACK:
+                await self._handle_base_layouts_th(update, context, data_parts)
+            
             elif callback_type == "confirm_payment":
                 await self._handle_payment_confirmation(update, context, data_parts)
             
@@ -818,3 +824,15 @@ class CallbackHandler:
         page = int(data_parts[2]) if len(data_parts) > 2 else 1
         
         await self.message_generator.handle_building_detail_menu(update, context, building_id, page)
+    
+    async def _handle_base_layouts(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка меню расстановок баз"""
+        await self.message_generator.handle_base_layouts_menu(update, context)
+    
+    async def _handle_base_layouts_th(self, update: Update, context: ContextTypes.DEFAULT_TYPE, data_parts: list):
+        """Обработка выбора уровня ТХ для расстановок"""
+        if len(data_parts) < 2:
+            return
+        
+        th_level = data_parts[1]
+        await self.message_generator.handle_base_layouts_th_menu(update, context, th_level)

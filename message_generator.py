@@ -2047,6 +2047,7 @@ class MessageGenerator:
                 f"о игре Clash of Clans.\n\n"
                 f"📋 <b>Доступные разделы:</b>\n"
                 f"• 🏗️ Стоимости строений - узнайте стоимость и время улучшения всех зданий\n"
+                f"• 🏰 Расстановки баз - лучшие базы для каждого уровня ТХ\n"
                 f"• Больше разделов будет добавлено в будущем!"
             )
             
@@ -2247,3 +2248,65 @@ class MessageGenerator:
         except Exception as e:
             logger.error(f"Ошибка при обработке информации о здании: {e}")
             await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке информации о здании.")
+    
+    async def handle_base_layouts_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка меню расстановок баз"""
+        try:
+            message = (
+                f"🏰 <b>Расстановки баз</b>\n\n"
+                f"Выберите уровень ратуши для просмотра лучших расстановок баз:\n\n"
+                f"💡 <i>Здесь будут представлены проверенные расстановки баз "
+                f"для каждого уровня ТХ с подробными описаниями и стратегиями.</i>"
+            )
+            
+            keyboard = Keyboards.base_layouts_menu()
+            
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(
+                    text=message,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text(
+                    text=message,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке меню расстановок баз: {e}")
+            error_message = "❌ Произошла ошибка при загрузке меню расстановок баз."
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(error_message)
+            else:
+                await update.message.reply_text(error_message)
+    
+    async def handle_base_layouts_th_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, th_level: str):
+        """Обработка выбора уровня ТХ для расстановок"""
+        try:
+            message = (
+                f"🏰 <b>Расстановки баз - ТХ {th_level}</b>\n\n"
+                f"🚧 <b>В разработке</b>\n\n"
+                f"Этот раздел находится в стадии разработки. Скоро здесь будут доступны:\n\n"
+                f"• 🛡️ Лучшие защитные базы\n"
+                f"• ⚔️ Фарм базы\n"
+                f"• 🏆 Трофейные базы\n"
+                f"• 🔥 Военные базы\n\n"
+                f"Следите за обновлениями!"
+            )
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Назад к выбору ТХ", callback_data=Keyboards.BASE_LAYOUTS_CALLBACK)],
+                [InlineKeyboardButton("🏛️ Центр сообщества", callback_data=Keyboards.COMMUNITY_CENTER_CALLBACK)]
+            ])
+            
+            await update.callback_query.edit_message_text(
+                text=message,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке ТХ {th_level} расстановок: {e}")
+            await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке расстановок.")

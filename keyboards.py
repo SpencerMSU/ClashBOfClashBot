@@ -62,6 +62,8 @@ class Keyboards:
     BUILDING_COSTS_CALLBACK = "building_costs"
     BUILDING_CATEGORY_CALLBACK = "building_category"
     BUILDING_DETAIL_CALLBACK = "building_detail"
+    BASE_LAYOUTS_CALLBACK = "base_layouts"
+    BASE_LAYOUTS_TH_CALLBACK = "base_layouts_th"
     
     @staticmethod
     def main_menu() -> ReplyKeyboardMarkup:
@@ -595,6 +597,8 @@ class Keyboards:
         keyboard = [
             [InlineKeyboardButton("🏗️ Стоимости строений", 
                                 callback_data=Keyboards.BUILDING_COSTS_CALLBACK)],
+            [InlineKeyboardButton("🏰 Расстановки баз", 
+                                callback_data=Keyboards.BASE_LAYOUTS_CALLBACK)],
             [InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")]
         ]
         return InlineKeyboardMarkup(keyboard)
@@ -684,6 +688,24 @@ class Keyboards:
             keyboard.append(row)
         
         keyboard.append([InlineKeyboardButton("⬅️ Категории", callback_data=Keyboards.BUILDING_COSTS_CALLBACK)])
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def base_layouts_menu() -> InlineKeyboardMarkup:
+        """Меню выбора уровня ТХ для расстановок баз"""
+        keyboard = []
+        
+        # Создаем кнопки для ТХ от 1 до 16 (по 4 в ряд)
+        for i in range(1, 17, 4):
+            row = []
+            for j in range(4):
+                if i + j <= 16:
+                    th_level = i + j
+                    row.append(InlineKeyboardButton(f"ТХ {th_level}", 
+                                                  callback_data=f"{Keyboards.BASE_LAYOUTS_TH_CALLBACK}:{th_level}"))
+            keyboard.append(row)
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Центр сообщества", callback_data=Keyboards.COMMUNITY_CENTER_CALLBACK)])
         return InlineKeyboardMarkup(keyboard)
 
 
