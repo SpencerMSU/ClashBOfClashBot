@@ -51,6 +51,7 @@ class MessageHandler:
             text == Keyboards.BACK_TO_CLAN_MENU_BTN or
             text == Keyboards.NOTIFICATIONS_BTN or
             text == Keyboards.COMMUNITY_CENTER_BTN or
+            text == Keyboards.ANALYZER_BTN or
             text == Keyboards.SUBSCRIPTION_BTN or
             text == Keyboards.LINKED_CLANS_BTN or
             text.startswith(Keyboards.MY_PROFILE_PREFIX)):
@@ -140,6 +141,9 @@ class MessageHandler:
             
             elif text == Keyboards.COMMUNITY_CENTER_BTN:
                 await self.message_generator.handle_community_center_menu(update, context)
+            
+            elif text == Keyboards.ANALYZER_BTN:
+                await self.message_generator.handle_analyzer_menu(update, context)
             
             elif text == Keyboards.SUBSCRIPTION_BTN:
                 await self.message_generator.handle_subscription_menu(update, context)

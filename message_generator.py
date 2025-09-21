@@ -2461,3 +2461,251 @@ class MessageGenerator:
             message += "\n"
         
         return message, total_pages
+    
+    async def handle_analyzer_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка анализатора войн"""
+        try:
+            chat_id = update.effective_chat.id
+            
+            # Проверяем, есть ли у пользователя привязанный аккаунт
+            user = await self.db_service.find_user(chat_id)
+            if not user or not user.player_tag:
+                await update.message.reply_text(
+                    "🤖 <b>Анализатор</b>\n\n"
+                    "❌ Для использования анализатора необходимо привязать аккаунт.\n"
+                    "Перейдите в профиль и привяжите ваш игровой аккаунт.",
+                    parse_mode='HTML',
+                    reply_markup=Keyboards.main_menu()
+                )
+                return
+            
+            # Показываем индикатор загрузки
+            loading_message = await update.message.reply_text(
+                "🤖 <b>Анализатор войн</b>\n\n"
+                "🔍 Анализирую текущую военную ситуацию...",
+                parse_mode='HTML'
+            )
+            
+            async with self.coc_client as client:
+                # Получаем информацию об игроке и его клане
+                player_data = await client.get_player_info(user.player_tag)
+                if not player_data or 'clan' not in player_data:
+                    await loading_message.edit_text(
+                        "🤖 <b>Анализатор войн</b>\n\n"
+                        "❌ Вы не состоите в клане. Анализатор работает только для участников кланов.",
+                        parse_mode='HTML'
+                    )
+                    return
+                
+                clan_tag = player_data['clan']['tag']
+                clan_name = player_data['clan']['name']
+                
+                # Проверяем текущие войны
+                war_analysis = await self._analyze_clan_wars(client, clan_tag, clan_name)
+                
+                # Формируем отчет анализатора
+                message = self._format_analyzer_report(war_analysis, player_data)
+                
+                # Создаем клавиатуру с возвратом в главное меню
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔄 Обновить анализ", 
+                                        callback_data="analyzer_refresh")],
+                    [InlineKeyboardButton("⬅️ Главное меню", 
+                                        callback_data="main_menu")]
+                ])
+                
+                await loading_message.edit_text(
+                    message,
+                    parse_mode='HTML',
+                    reply_markup=keyboard
+                )
+                
+        except Exception as e:
+            logger.error(f"Ошибка при работе анализатора: {e}")
+            error_message = "🤖 <b>Анализатор войн</b>\n\n❌ Произошла ошибка при анализе. Попробуйте позже."
+            if 'loading_message' in locals():
+                await loading_message.edit_text(error_message, parse_mode='HTML')
+            else:
+                await update.message.reply_text(error_message, parse_mode='HTML')
+    
+    async def _analyze_clan_wars(self, client, clan_tag: str, clan_name: str) -> Dict:
+        """Анализ текущих войн клана"""
+        analysis = {
+            'clan_name': clan_name,
+            'current_war': None,
+            'cwl_war': None,
+            'is_attack_day': False,
+            'recommendations': []
+        }
+        
+        try:
+            # Проверяем обычную клановую войну
+            current_war = await client.get_current_war(clan_tag)
+            if current_war and current_war.get('state') in ['inWar', 'preparation']:
+                analysis['current_war'] = current_war
+                
+                # Проверяем, день атак ли сейчас
+                if current_war.get('state') == 'inWar':
+                    analysis['is_attack_day'] = True
+                    # Генерируем рекомендации для атак
+                    analysis['recommendations'] = self._generate_attack_recommendations(current_war)
+            
+            # Проверяем ЛВК (League War)
+            try:
+                cwl_war = await client.get_current_cwl_war(clan_tag)
+                if cwl_war and cwl_war.get('state') in ['inWar', 'preparation']:
+                    analysis['cwl_war'] = cwl_war
+                    
+                    if cwl_war.get('state') == 'inWar':
+                        analysis['is_attack_day'] = True
+                        # Генерируем рекомендации для ЛВК
+                        cwl_recommendations = self._generate_attack_recommendations(cwl_war, is_cwl=True)
+                        analysis['recommendations'].extend(cwl_recommendations)
+            except Exception as cwl_error:
+                logger.debug(f"ЛВК не активна или ошибка получения данных: {cwl_error}")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при анализе войн: {e}")
+        
+        return analysis
+    
+    def _generate_attack_recommendations(self, war_data: Dict, is_cwl: bool = False) -> List[Dict]:
+        """Генерация рекомендаций для атак (упрощенная AI логика)"""
+        recommendations = []
+        
+        try:
+            clan_members = war_data.get('clan', {}).get('members', [])
+            opponent_members = war_data.get('opponent', {}).get('members', [])
+            
+            # Простая логика рекомендаций на основе соотношения TH и атак
+            for member in clan_members:
+                member_name = member.get('name', 'Неизвестно')
+                member_th = member.get('townhallLevel', 0)
+                attacks_used = len(member.get('attacks', []))
+                max_attacks = 2  # В обычных войнах по 2 атаки
+                
+                if attacks_used < max_attacks:
+                    # Ищем подходящие цели
+                    suitable_targets = []
+                    for opponent in opponent_members:
+                        opponent_name = opponent.get('name', 'Неизвестно')
+                        opponent_th = opponent.get('townhallLevel', 0)
+                        opponent_pos = opponent.get('mapPosition', 0)
+                        
+                        # Простая логика выбора цели
+                        if member_th >= opponent_th:  # Может атаковать равных или слабее
+                            difficulty = self._calculate_attack_difficulty(member_th, opponent_th)
+                            success_chance = self._estimate_success_chance(member_th, opponent_th, member, opponent)
+                            
+                            suitable_targets.append({
+                                'name': opponent_name,
+                                'position': opponent_pos,
+                                'th_level': opponent_th,
+                                'difficulty': difficulty,
+                                'success_chance': success_chance
+                            })
+                    
+                    if suitable_targets:
+                        # Сортируем цели по вероятности успеха
+                        suitable_targets.sort(key=lambda x: x['success_chance'], reverse=True)
+                        best_target = suitable_targets[0]
+                        
+                        rec_type = "ЛВК" if is_cwl else "КВ"
+                        recommendations.append({
+                            'attacker': member_name,
+                            'attacker_th': member_th,
+                            'target': best_target,
+                            'war_type': rec_type,
+                            'attacks_remaining': max_attacks - attacks_used
+                        })
+        
+        except Exception as e:
+            logger.error(f"Ошибка при генерации рекомендаций: {e}")
+        
+        return recommendations[:5]  # Возвращаем топ-5 рекомендаций
+    
+    def _calculate_attack_difficulty(self, attacker_th: int, defender_th: int) -> str:
+        """Расчет сложности атаки"""
+        diff = attacker_th - defender_th
+        if diff >= 2:
+            return "Легкая"
+        elif diff == 1:
+            return "Умеренная"
+        elif diff == 0:
+            return "Сложная"
+        else:
+            return "Очень сложная"
+    
+    def _estimate_success_chance(self, attacker_th: int, defender_th: int, attacker: Dict, defender: Dict) -> int:
+        """Упрощенная оценка вероятности успеха атаки (0-100%)"""
+        base_chance = 60  # Базовая вероятность
+        
+        # Бонус за превосходство в TH
+        th_diff = attacker_th - defender_th
+        base_chance += th_diff * 15
+        
+        # Бонус за опыт (если есть данные об атаках)
+        attacker_attacks = len(attacker.get('attacks', []))
+        if attacker_attacks > 0:
+            base_chance += 10  # Бонус за опыт в текущей войне
+        
+        # Ограничиваем значения
+        return max(10, min(95, base_chance))
+    
+    def _format_analyzer_report(self, analysis: Dict, player_data: Dict) -> str:
+        """Форматирование отчета анализатора"""
+        clan_name = analysis['clan_name']
+        player_name = player_data.get('name', 'Неизвестно')
+        
+        message = f"🤖 <b>Анализатор войн</b>\n\n"
+        message += f"👤 Игрок: {player_name}\n"
+        message += f"🛡️ Клан: {clan_name}\n\n"
+        
+        # Проверяем статус войн
+        has_active_war = analysis['current_war'] or analysis['cwl_war']
+        
+        if not has_active_war:
+            message += "😴 <b>Статус:</b> Мирное время\n\n"
+            message += "📋 В данный момент ваш клан не участвует в войнах.\n"
+            message += "🔍 Анализатор автоматически активируется при начале КВ или ЛВК."
+            return message
+        
+        if analysis['is_attack_day']:
+            message += "⚔️ <b>Статус:</b> День атак! 🔥\n\n"
+        else:
+            message += "🛡️ <b>Статус:</b> День подготовки\n\n"
+        
+        # Информация о текущих войнах
+        if analysis['current_war']:
+            war = analysis['current_war']
+            state = "Идет война" if war.get('state') == 'inWar' else "Подготовка"
+            message += f"⚔️ <b>Клановая война:</b> {state}\n"
+            
+            clan_stars = war.get('clan', {}).get('stars', 0)
+            opponent_stars = war.get('opponent', {}).get('stars', 0)
+            message += f"⭐ Счет: {clan_stars} - {opponent_stars}\n\n"
+        
+        if analysis['cwl_war']:
+            message += f"🏆 <b>ЛВК:</b> Активна\n\n"
+        
+        # Рекомендации по атакам
+        if analysis['recommendations'] and analysis['is_attack_day']:
+            message += "🎯 <b>Рекомендации по атакам:</b>\n\n"
+            
+            for i, rec in enumerate(analysis['recommendations'][:3], 1):  # Показываем топ-3
+                target = rec['target']
+                message += f"{i}. <b>{rec['attacker']}</b> (ТХ{rec['attacker_th']})\n"
+                message += f"   🎯 Цель: {target['name']} (#{target['position']}, ТХ{target['th_level']})\n"
+                message += f"   📊 Успех: {target['success_chance']}% | {target['difficulty']}\n"
+                message += f"   ⚔️ Атак осталось: {rec['attacks_remaining']}\n\n"
+            
+            if len(analysis['recommendations']) > 3:
+                message += f"... и еще {len(analysis['recommendations']) - 3} рекомендаций\n\n"
+        
+        elif analysis['is_attack_day']:
+            message += "✅ <b>Анализ завершен</b>\n\n"
+            message += "Все участники уже использовали свои атаки или нет подходящих целей."
+        
+        message += "💡 <i>Рекомендации основаны на соотношении ТХ и данных о предыдущих атаках</i>"
+        
+        return message

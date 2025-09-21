@@ -30,6 +30,7 @@ class Keyboards:
     LINKED_CLANS_BTN = "🔗 Привязанные кланы"
     COMMUNITY_CENTER_BTN = "🏛️ Центр сообщества"
     ACHIEVEMENTS_BTN = "🏆 Достижения"
+    ANALYZER_BTN = "🤖 Анализатор"
     
     # Константы для callback-данных
     MEMBERS_CALLBACK = "members"
@@ -74,7 +75,8 @@ class Keyboards:
         """Главное меню бота"""
         keyboard = [
             [KeyboardButton(Keyboards.PROFILE_BTN), KeyboardButton(Keyboards.CLAN_BTN)],
-            [KeyboardButton(Keyboards.NOTIFICATIONS_BTN), KeyboardButton(Keyboards.COMMUNITY_CENTER_BTN)]
+            [KeyboardButton(Keyboards.NOTIFICATIONS_BTN), KeyboardButton(Keyboards.COMMUNITY_CENTER_BTN)],
+            [KeyboardButton(Keyboards.ANALYZER_BTN)]
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
