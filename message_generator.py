@@ -2129,8 +2129,8 @@ class MessageGenerator:
             logger.error(f"Ошибка при обработке категории зданий: {e}")
             await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке категории.")
     
-    async def handle_building_detail_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, building_id: str):
-        """Обработка детальной информации о здании"""
+    async def handle_building_detail_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, building_id: str, page: int = 1):
+        """Обработка детальной информации о здании с пагинацией"""
         try:
             from building_data import get_building_info, format_currency, format_time
             
@@ -2147,32 +2147,100 @@ class MessageGenerator:
                 await update.callback_query.edit_message_text("❌ Данные об уровнях не найдены.")
                 return
             
-            message = f"🏗️ <b>{building_name}</b>\n\n"
+            # Определяем, является ли здание героем (много уровней)
+            is_hero = building_id in ['barbarian_king', 'archer_queen', 'grand_warden', 'royal_champion']
+            levels_per_page = 10 if is_hero else 15
             
-            # Показываем информацию о всех уровнях (ограничиваем по длине сообщения)
-            level_count = 0
-            for level, data in sorted(levels.items()):
-                if level_count >= 15:  # Ограничиваем количество уровней
-                    message += f"\n... и ещё {len(levels) - level_count} уровней"
-                    break
-                
+            # Сортируем уровни
+            sorted_levels = sorted(levels.items())
+            total_levels = len(sorted_levels)
+            total_pages = (total_levels + levels_per_page - 1) // levels_per_page
+            
+            # Проверяем корректность страницы
+            if page < 1:
+                page = 1
+            elif page > total_pages:
+                page = total_pages
+            
+            # Вычисляем индексы для текущей страницы
+            start_idx = (page - 1) * levels_per_page
+            end_idx = min(start_idx + levels_per_page, total_levels)
+            
+            message = f"🏗️ <b>{building_name}</b>\n"
+            if is_hero:
+                message += f"📖 Страница {page}/{total_pages}\n\n"
+            else:
+                message += "\n"
+            
+            # Показываем уровни для текущей страницы
+            for i in range(start_idx, end_idx):
+                level, data = sorted_levels[i]
                 cost = format_currency(data["cost"], data["currency"])
                 time_str = format_time(data["time"])
                 th_level = data.get("th_level", "?")
                 
                 message += f"<b>Уровень {level}:</b> {cost}, {time_str} (ТХ {th_level})\n"
-                level_count += 1
             
-            message += f"\n💡 <i>Всего уровней: {len(levels)}</i>"
+            if not is_hero:
+                message += f"\n💡 <i>Всего уровней: {total_levels}</i>"
+            
+            # Создаем клавиатуру
+            keyboard = []
+            
+            # Для героев добавляем навигацию по страницам
+            if is_hero and total_pages > 1:
+                nav_buttons = []
+                
+                # Кнопка "Предыдущая страница"
+                if page > 1:
+                    nav_buttons.append(InlineKeyboardButton("⬅️", 
+                                                          callback_data=f"{Keyboards.BUILDING_DETAIL_CALLBACK}:{building_id}:{page-1}"))
+                
+                # Показываем текущую страницу
+                nav_buttons.append(InlineKeyboardButton(f"{page}/{total_pages}", 
+                                                      callback_data="noop"))
+                
+                # Кнопка "Следующая страница"
+                if page < total_pages:
+                    nav_buttons.append(InlineKeyboardButton("➡️", 
+                                                          callback_data=f"{Keyboards.BUILDING_DETAIL_CALLBACK}:{building_id}:{page+1}"))
+                
+                keyboard.append(nav_buttons)
+                
+                # Дополнительные кнопки для быстрого перехода
+                if total_pages > 3:
+                    quick_nav = []
+                    if page > 2:
+                        quick_nav.append(InlineKeyboardButton("⏮️ В начало", 
+                                                            callback_data=f"{Keyboards.BUILDING_DETAIL_CALLBACK}:{building_id}:1"))
+                    if page < total_pages - 1:
+                        quick_nav.append(InlineKeyboardButton("В конец ⏭️", 
+                                                            callback_data=f"{Keyboards.BUILDING_DETAIL_CALLBACK}:{building_id}:{total_pages}"))
+                    if quick_nav:
+                        keyboard.append(quick_nav)
+                
+                # Добавляем информацию о уровнях
+                info_text = f"💡 Всего уровней: {total_levels}"
+                if building_id == 'barbarian_king':
+                    info_text += " (макс. 80)"
+                elif building_id == 'archer_queen':
+                    info_text += " (макс. 80)"
+                elif building_id == 'grand_warden':
+                    info_text += " (макс. 55)"
+                elif building_id == 'royal_champion':
+                    info_text += " (макс. 30)"
+                
+                message += f"\n\n{info_text}"
             
             # Кнопка возврата
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Назад", callback_data=Keyboards.BUILDING_COSTS_CALLBACK)]
-            ])
+            keyboard.append([InlineKeyboardButton("⬅️ Назад", 
+                                                callback_data=Keyboards.BUILDING_COSTS_CALLBACK)])
+            
+            keyboard_markup = InlineKeyboardMarkup(keyboard)
             
             await update.callback_query.edit_message_text(
                 text=message,
-                reply_markup=keyboard,
+                reply_markup=keyboard_markup,
                 parse_mode='HTML'
             )
             

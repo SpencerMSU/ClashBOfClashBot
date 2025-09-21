@@ -815,4 +815,6 @@ class CallbackHandler:
             return
         
         building_id = data_parts[1]
-        await self.message_generator.handle_building_detail_menu(update, context, building_id)
+        page = int(data_parts[2]) if len(data_parts) > 2 else 1
+        
+        await self.message_generator.handle_building_detail_menu(update, context, building_id, page)
