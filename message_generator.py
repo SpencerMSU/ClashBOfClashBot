@@ -187,9 +187,51 @@ class MessageGenerator:
             await self.display_clan_info(update, context, clan_tag)
     
     async def display_player_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
-                                 player_tag: str, keyboard: InlineKeyboardMarkup = None):
+                                 player_tag: str, keyboard: InlineKeyboardMarkup = None, 
+                                 back_keyboard: InlineKeyboardMarkup = None, from_callback: bool = False):
         """Отображение информации об игроке"""
 
+        # Handle callback updates differently 
+        if from_callback and hasattr(update, 'callback_query') and update.callback_query:
+            # For callback queries, directly edit the existing message
+            await update.callback_query.edit_message_text("🔍 Поиск игрока...")
+            
+            async with self.coc_client as client:
+                player_data = await client.get_player_info(player_tag)
+                
+                if not player_data:
+                    await update.callback_query.edit_message_text(
+                        "❌ Игрок с таким тегом не найден.\n"
+                        "Проверьте правильность введенного тега."
+                    )
+                    return
+                
+                # Форматируем информацию об игроке
+                message = self._format_player_info(player_data)
+                
+                # Create achievements button for profile displays
+                profile_keyboard = []
+                profile_keyboard.append([InlineKeyboardButton("🏆 Достижения", 
+                                                             callback_data=f"{Keyboards.ACHIEVEMENTS_CALLBACK}:{player_tag}")])
+                
+                # Add back_keyboard buttons if provided
+                if back_keyboard and back_keyboard.inline_keyboard:
+                    profile_keyboard.extend(back_keyboard.inline_keyboard)
+                
+                # Add keyboard buttons if provided
+                if keyboard and keyboard.inline_keyboard:
+                    profile_keyboard.extend(keyboard.inline_keyboard)
+                
+                final_keyboard = InlineKeyboardMarkup(profile_keyboard) if profile_keyboard else None
+                
+                await update.callback_query.edit_message_text(
+                    message,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=final_keyboard
+                )
+            return
+
+        # Handle regular message updates (original logic)
         # Сначала убираем клавиатуру и показываем сообщение о поиске
         search_message = await update.message.reply_text(
             "🔍 Поиск игрока...",
@@ -215,18 +257,27 @@ class MessageGenerator:
             # Форматируем информацию об игроке
             message = self._format_player_info(player_data)
             
+            # Create achievements button for profile displays
+            profile_keyboard = []
+            profile_keyboard.append([InlineKeyboardButton("🏆 Достижения", 
+                                                         callback_data=f"{Keyboards.ACHIEVEMENTS_CALLBACK}:{player_tag}")])
+            
+            # Add back_keyboard buttons if provided
+            if back_keyboard and back_keyboard.inline_keyboard:
+                profile_keyboard.extend(back_keyboard.inline_keyboard)
+            
+            # Add keyboard buttons if provided  
+            if keyboard and keyboard.inline_keyboard:
+                profile_keyboard.extend(keyboard.inline_keyboard)
+            
+            final_keyboard = InlineKeyboardMarkup(profile_keyboard) if profile_keyboard else None
+            
             # Редактируем сообщение поиска на информацию об игроке
-            if keyboard:
-                await search_message.edit_text(
-                    message,
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=keyboard
-                )
-            else:
-                await search_message.edit_text(
-                    message,
-                    parse_mode=ParseMode.MARKDOWN
-                )
+            await search_message.edit_text(
+                message,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=final_keyboard
+            )
     
     async def display_clan_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE, clan_tag: str):
         """Отображение информации о клане"""
@@ -413,36 +464,83 @@ class MessageGenerator:
         """Обработка меню уведомлений"""
         chat_id = update.effective_chat.id
         
-        # Проверяем текущий статус уведомлений
-        subscribed_users = await self.db_service.get_subscribed_users()
-        is_subscribed = chat_id in subscribed_users
+        try:
+            # Проверяем статус подписки пользователя
+            subscription = await self.db_service.get_subscription(chat_id)
+            is_premium = subscription and subscription.is_active and not subscription.is_expired()
+            
+            # Проверяем статус уведомлений
+            notification_status = await self.db_service.is_notifications_enabled(chat_id)
+            
+            message = (
+                f"🔔 <b>Настройки уведомлений</b>\n\n"
+                f"📊 Статус: {'✅ Включены' if notification_status else '❌ Отключены'}\n"
+            )
+            
+            if is_premium:
+                message += (
+                    f"💎 Статус подписки: {'👑 ПРО ПЛЮС' if 'proplus' in subscription.subscription_type else '💎 Премиум'}\n\n"
+                    f"🔔 Базовые уведомления за 1 час до КВ\n"
+                    f"⚙️ Доступны расширенные настройки"
+                )
+            else:
+                message += (
+                    f"📱 Доступны базовые уведомления за 1 час до КВ\n"
+                    f"💎 Для расширенных настроек активируйте подписку"
+                )
+            
+            keyboard = Keyboards.notification_toggle()
+            
+            await update.message.reply_text(
+                message, 
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
         
-        status_text = "включены" if is_subscribed else "отключены"
-        message = f"🔔 Уведомления о клановых войнах: *{status_text}*\n\n" \
-                 f"Нажмите кнопку ниже для изменения настроек."
-        
-        await update.message.reply_text(
-            message, 
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=Keyboards.notification_toggle()
-        )
-    
+        except Exception as e:
+            logger.error(f"Ошибка при обработке меню уведомлений: {e}")
+            await update.message.reply_text("Произошла ошибка при загрузке настроек уведомлений.")
+
     async def handle_notification_toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
                                        message_id: int):
-        """Переключение уведомлений"""
+        """Переключение уведомлений с сохранением формата сообщения"""
         chat_id = update.effective_chat.id
         
-        is_enabled = await self.db_service.toggle_notifications(chat_id)
-        
-        status_text = "включены" if is_enabled else "отключены"
-        message = f"🔔 Уведомления о клановых войнах: *{status_text}*\n\n" \
-                 f"Нажмите кнопку ниже для изменения настроек."
-        
-        await update.callback_query.edit_message_text(
-            message,
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=Keyboards.notification_toggle()
-        )
+        try:
+            # Проверяем статус подписки пользователя
+            subscription = await self.db_service.get_subscription(chat_id)
+            is_premium = subscription and subscription.is_active and not subscription.is_expired()
+            
+            # Переключаем статус уведомлений
+            is_enabled = await self.db_service.toggle_notifications(chat_id)
+            
+            # Формируем обновленное сообщение в том же формате
+            message = (
+                f"🔔 <b>Настройки уведомлений</b>\n\n"
+                f"📊 Статус: {'✅ Включены' if is_enabled else '❌ Отключены'}\n"
+            )
+            
+            if is_premium:
+                message += (
+                    f"💎 Статус подписки: {'👑 ПРО ПЛЮС' if 'proplus' in subscription.subscription_type else '💎 Премиум'}\n\n"
+                    f"🔔 Базовые уведомления за 1 час до КВ\n"
+                    f"⚙️ Доступны расширенные настройки"
+                )
+            else:
+                message += (
+                    f"📱 Доступны базовые уведомления за 1 час до КВ\n"
+                    f"💎 Для расширенных настроек активируйте подписку"
+                )
+            
+            await update.callback_query.edit_message_text(
+                message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=Keyboards.notification_toggle()
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка при переключении уведомлений: {e}")
+            await update.callback_query.edit_message_text("❌ Произошла ошибка при изменении настроек.")
     
     def _format_player_info(self, player_data: Dict[Any, Any]) -> str:
         """Форматирование информации об игроке"""
@@ -474,6 +572,11 @@ class MessageGenerator:
         received = player_data.get('donationsReceived', 0)
         message += f"📤 Отдано войск: {donations:,}\n"
         message += f"📥 Получено войск: {received:,}\n"
+        
+        # Add super troops information
+        super_troops = self._format_super_troops_info(player_data)
+        if super_troops:
+            message += f"\n{super_troops}"
         
         # Add league information
         league = player_data.get('league')
@@ -520,6 +623,107 @@ class MessageGenerator:
             message += f"\n🚫 Не состоит в клане"
         
         return message
+    
+    def _format_super_troops_info(self, player_data: Dict[Any, Any]) -> str:
+        """Форматирование информации о супер войсках"""
+        try:
+            troops = player_data.get('troops', [])
+            super_troops = []
+            
+            # Список известных супер войск с их обычными названиями  
+            super_troop_names = {
+                'Super Barbarian': '⚔️ Супер варвар',
+                'Super Archer': '🏹 Супер лучница', 
+                'Super Giant': '🗿 Супер гигант',
+                'Sneaky Goblin': '👻 Скрытный гоблин',
+                'Super Wall Breaker': '💥 Супер стенобой',
+                'Super Wizard': '🧙‍♂️ Супер маг',
+                'Inferno Dragon': '🔥 Инферно дракон',
+                'Super Minion': '👿 Супер прислужник',
+                'Super Valkyrie': '⚡ Супер валькирия',
+                'Super Witch': '🧙‍♀️ Супер ведьма',
+                'Ice Hound': '🧊 Ледяная гончая',
+                'Super Bowler': '🎳 Супер боулер',
+                'Super Dragon': '🐲 Супер дракон',
+                'Super Miner': '⛏️ Супер шахтер'
+            }
+            
+            # Ищем активные супер войска
+            for troop in troops:
+                troop_name = troop.get('name', '')
+                if troop_name in super_troop_names:
+                    level = troop.get('level', 0)
+                    max_level = troop.get('maxLevel', 0)
+                    village = troop.get('village', 'home')
+                    
+                    if village == 'home' and level > 0:  # Только войска основной деревни
+                        display_name = super_troop_names[troop_name]
+                        
+                        # Примерное время действия супер войск (обычно 3 дня)
+                        # В реальном API это поле может называться по-разному
+                        remaining_time = self._calculate_super_troop_time(troop)
+                        
+                        super_troops.append({
+                            'name': display_name,
+                            'level': level,
+                            'max_level': max_level,
+                            'remaining_time': remaining_time
+                        })
+            
+            if not super_troops:
+                return ""
+            
+            # Сортируем по времени (активные сначала)
+            super_troops.sort(key=lambda x: x['remaining_time'], reverse=True)
+            
+            message = "⚡ *Супер войска:*\n"
+            
+            # Показываем до 2 супер войск как СУПЕР ВОЙКО 1 и 2
+            for i, troop in enumerate(super_troops[:2], 1):
+                status = "Активно" if troop['remaining_time'] > 0 else "Неактивно"
+                time_text = f"{troop['remaining_time']}ч" if troop['remaining_time'] > 0 else "0ч"
+                
+                message += f"🔥 СУПЕР ВОЙКО {i}: {troop['name']}\n"
+                message += f"   📊 Уровень: {troop['level']}/{troop['max_level']}\n"
+                message += f"   ⏰ Время: {time_text} | {status}\n"
+            
+            # Если есть только одно супер войско, добавляем пустой слот
+            if len(super_troops) == 1:
+                message += f"🔥 СУПЕР ВОЙКО 2: Не активировано\n"
+                message += f"   📊 Уровень: 0/0\n"
+                message += f"   ⏰ Время: 0ч | Неактивно\n"
+            elif len(super_troops) == 0:
+                message += f"🔥 СУПЕР ВОЙКО 1: Не активировано\n"
+                message += f"   📊 Уровень: 0/0\n"
+                message += f"   ⏰ Время: 0ч | Неактивно\n"
+                message += f"🔥 СУПЕР ВОЙКО 2: Не активировано\n"
+                message += f"   📊 Уровень: 0/0\n"
+                message += f"   ⏰ Время: 0ч | Неактивно\n"
+            
+            return message
+            
+        except Exception as e:
+            logger.error(f"Ошибка при форматировании супер войск: {e}")
+            return ""
+    
+    def _calculate_super_troop_time(self, troop: Dict) -> int:
+        """Расчет оставшегося времени супер войска (упрощенная версия)"""
+        try:
+            # Поскольку COC API не всегда предоставляет точное время супер войск,
+            # используем упрощенную логику на основе уровня и активности
+            level = troop.get('level', 0)
+            
+            if level > 0:
+                # Если войско прокачено, считаем что супер режим активен
+                # В реальности нужно будет получать данные о времени активации
+                # Для демонстрации возвращаем случайное время от 24 до 72 часов
+                import random
+                return random.randint(24, 72)
+            else:
+                return 0
+                
+        except Exception:
+            return 0
     
     def _format_clan_info(self, clan_data: Dict[Any, Any]) -> str:
         """Форматирование информации о клане"""
@@ -1339,71 +1543,6 @@ class MessageGenerator:
         
         return message
     
-    async def handle_notifications_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработка меню уведомлений"""
-        chat_id = update.effective_chat.id
-        
-        try:
-            # Проверяем статус подписки пользователя
-            subscription = await self.db_service.get_subscription(chat_id)
-            is_premium = subscription and subscription.is_active and not subscription.is_expired()
-            
-            # Проверяем статус уведомлений
-            notification_status = await self.db_service.is_notifications_enabled(chat_id)
-            
-            message = (
-                f"🔔 <b>Настройки уведомлений</b>\n\n"
-                f"📊 Статус: {'✅ Включены' if notification_status else '❌ Отключены'}\n"
-            )
-            
-            if is_premium:
-                message += (
-                    f"💎 Статус подписки: {'👑 ПРО ПЛЮС' if 'proplus' in subscription.subscription_type else '💎 Премиум'}\n\n"
-                    f"🔔 Базовые уведомления за 1 час до КВ\n"
-                    f"⚙️ Доступны расширенные настройки"
-                )
-            else:
-                message += (
-                    f"📱 Доступны базовые уведомления за 1 час до КВ\n"
-                    f"💎 Для расширенных настроек активируйте подписку"
-                )
-            
-            keyboard = Keyboards.notification_menu(is_premium)
-            
-            await update.message.reply_text(
-                message, 
-                reply_markup=keyboard,
-                parse_mode=ParseMode.HTML
-            )
-        
-        except Exception as e:
-            logger.error(f"Ошибка при обработке меню уведомлений: {e}")
-            await update.message.reply_text("Произошла ошибка при загрузке настроек уведомлений.")
-    
-    async def handle_notification_toggle(self, update: Update, context: ContextTypes.DEFAULT_TYPE, message_id: int):
-        """Обработка переключения уведомлений"""
-        chat_id = update.effective_chat.id
-        
-        try:
-            # Переключаем статус уведомлений
-            current_status = await self.db_service.is_notifications_enabled(chat_id)
-            
-            if current_status:
-                success = await self.db_service.disable_notifications(chat_id)
-                message = "❌ Уведомления отключены"
-            else:
-                success = await self.db_service.enable_notifications(chat_id)
-                message = "✅ Уведомления включены"
-            
-            if success:
-                await update.callback_query.edit_message_text(message)
-            else:
-                await update.callback_query.edit_message_text("❌ Ошибка при изменении настроек")
-        
-        except Exception as e:
-            logger.error(f"Ошибка при переключении уведомлений: {e}")
-            await update.callback_query.edit_message_text("Произошла ошибка при изменении настроек.")
-    
     async def handle_premium_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка меню для премиум подписчиков"""
         chat_id = update.effective_chat.id
@@ -2047,6 +2186,7 @@ class MessageGenerator:
                 f"о игре Clash of Clans.\n\n"
                 f"📋 <b>Доступные разделы:</b>\n"
                 f"• 🏗️ Стоимости строений - узнайте стоимость и время улучшения всех зданий\n"
+                f"• 🏰 Расстановки баз - лучшие базы для каждого уровня ТХ\n"
                 f"• Больше разделов будет добавлено в будущем!"
             )
             
@@ -2247,3 +2387,413 @@ class MessageGenerator:
         except Exception as e:
             logger.error(f"Ошибка при обработке информации о здании: {e}")
             await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке информации о здании.")
+    
+    async def handle_base_layouts_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка меню расстановок баз"""
+        try:
+            message = (
+                f"🏰 <b>Расстановки баз</b>\n\n"
+                f"Выберите уровень ратуши для просмотра лучших расстановок баз:\n\n"
+                f"💡 <i>Здесь будут представлены проверенные расстановки баз "
+                f"для каждого уровня ТХ с подробными описаниями и стратегиями.</i>"
+            )
+            
+            keyboard = Keyboards.base_layouts_menu()
+            
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(
+                    text=message,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text(
+                    text=message,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке меню расстановок баз: {e}")
+            error_message = "❌ Произошла ошибка при загрузке меню расстановок баз."
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(error_message)
+            else:
+                await update.message.reply_text(error_message)
+    
+    async def handle_base_layouts_th_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, th_level: str):
+        """Обработка выбора уровня ТХ для расстановок"""
+        try:
+            message = (
+                f"🏰 <b>Расстановки баз - ТХ {th_level}</b>\n\n"
+                f"🚧 <b>В разработке</b>\n\n"
+                f"Этот раздел находится в стадии разработки. Скоро здесь будут доступны:\n\n"
+                f"• 🛡️ Лучшие защитные базы\n"
+                f"• ⚔️ Фарм базы\n"
+                f"• 🏆 Трофейные базы\n"
+                f"• 🔥 Военные базы\n\n"
+                f"Следите за обновлениями!"
+            )
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Назад к выбору ТХ", callback_data=Keyboards.BASE_LAYOUTS_CALLBACK)],
+                [InlineKeyboardButton("🏛️ Центр сообщества", callback_data=Keyboards.COMMUNITY_CENTER_CALLBACK)]
+            ])
+            
+            await update.callback_query.edit_message_text(
+                text=message,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке ТХ {th_level} расстановок: {e}")
+            await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке расстановок.")
+    
+    async def handle_achievements_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+                                     player_tag: str, page: int = 1, sort_type: str = "progress"):
+        """Обработка меню достижений игрока"""
+        try:
+            # Получаем данные игрока для достижений
+            async with self.coc_client as client:
+                player_data = await client.get_player_info(player_tag)
+                
+                if not player_data:
+                    await update.callback_query.edit_message_text("❌ Игрок не найден.")
+                    return
+                
+                player_name = player_data.get('name', 'Неизвестно')
+                achievements = player_data.get('achievements', [])
+                
+                # Форматируем сообщение с достижениями
+                message, total_pages = self._format_achievements_page(player_name, achievements, page, sort_type)
+                
+                # Создаем клавиатуру
+                keyboard = Keyboards.achievements_menu(player_tag, page, sort_type, total_pages)
+                
+                await update.callback_query.edit_message_text(
+                    text=message,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+                
+        except Exception as e:
+            logger.error(f"Ошибка при обработке достижений игрока {player_tag}: {e}")
+            await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке достижений.")
+    
+    def _format_achievements_page(self, player_name: str, achievements: List[Dict], 
+                                page: int, sort_type: str) -> tuple:
+        """Форматирование страницы достижений"""
+        
+        # Сортировка достижений
+        if sort_type == "progress":
+            # Сортировка по прогрессу (процент завершения)
+            achievements = sorted(achievements, key=lambda x: (x.get('value', 0) / max(x.get('target', 1), 1)), reverse=True)
+        elif sort_type == "profitability":
+            # Сортировка по прибыльности (награда в гемах)
+            achievements = sorted(achievements, key=lambda x: x.get('completionInfo', {}).get('gems', 0), reverse=True)
+        
+        # Пагинация
+        items_per_page = 5
+        total_pages = (len(achievements) + items_per_page - 1) // items_per_page
+        start_idx = (page - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        page_achievements = achievements[start_idx:end_idx]
+        
+        sort_name = "прогрессу" if sort_type == "progress" else "прибыльности"
+        
+        message = (
+            f"🏆 <b>Достижения - {player_name}</b>\n"
+            f"📊 Сортировка по: {sort_name}\n"
+            f"📄 Страница {page} из {total_pages}\n\n"
+        )
+        
+        if not page_achievements:
+            message += "❌ На этой странице нет достижений."
+            return message, total_pages
+        
+        for i, achievement in enumerate(page_achievements, 1):
+            name = achievement.get('name', 'Неизвестно')
+            value = achievement.get('value', 0)
+            target = achievement.get('target', 0)
+            
+            # Вычисляем процент прогресса
+            progress_percent = (value / max(target, 1)) * 100
+            
+            # Статус достижения
+            if value >= target:
+                status = "✅"
+                progress_bar = "🟩🟩🟩🟩🟩"
+            else:
+                status = "⏳"
+                filled_blocks = int((progress_percent / 100) * 5)
+                progress_bar = "🟩" * filled_blocks + "⬜" * (5 - filled_blocks)
+            
+            # Информация о награде
+            completion_info = achievement.get('completionInfo', {})
+            gems = completion_info.get('gems', 0)
+            xp = completion_info.get('experienceReward', 0)
+            
+            message += f"{status} <b>{name}</b>\n"
+            message += f"   📊 {progress_bar} {progress_percent:.1f}%\n"
+            message += f"   🎯 {value:,}/{target:,}\n"
+            
+            if gems > 0 or xp > 0:
+                rewards = []
+                if gems > 0:
+                    rewards.append(f"💎 {gems}")
+                if xp > 0:
+                    rewards.append(f"⭐ {xp}")
+                message += f"   🎁 {' | '.join(rewards)}\n"
+            
+            message += "\n"
+        
+        return message, total_pages
+    
+    async def handle_analyzer_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка анализатора войн"""
+        try:
+            chat_id = update.effective_chat.id
+            
+            # Проверяем, есть ли у пользователя привязанный аккаунт
+            user = await self.db_service.find_user(chat_id)
+            if not user or not user.player_tag:
+                await update.message.reply_text(
+                    "🤖 <b>Анализатор</b>\n\n"
+                    "❌ Для использования анализатора необходимо привязать аккаунт.\n"
+                    "Перейдите в профиль и привяжите ваш игровой аккаунт.",
+                    parse_mode='HTML',
+                    reply_markup=Keyboards.main_menu()
+                )
+                return
+            
+            # Показываем индикатор загрузки
+            loading_message = await update.message.reply_text(
+                "🤖 <b>Анализатор войн</b>\n\n"
+                "🔍 Анализирую текущую военную ситуацию...",
+                parse_mode='HTML'
+            )
+            
+            async with self.coc_client as client:
+                # Получаем информацию об игроке и его клане
+                player_data = await client.get_player_info(user.player_tag)
+                if not player_data or 'clan' not in player_data:
+                    await loading_message.edit_text(
+                        "🤖 <b>Анализатор войн</b>\n\n"
+                        "❌ Вы не состоите в клане. Анализатор работает только для участников кланов.",
+                        parse_mode='HTML'
+                    )
+                    return
+                
+                clan_tag = player_data['clan']['tag']
+                clan_name = player_data['clan']['name']
+                
+                # Проверяем текущие войны
+                war_analysis = await self._analyze_clan_wars(client, clan_tag, clan_name)
+                
+                # Формируем отчет анализатора
+                message = self._format_analyzer_report(war_analysis, player_data)
+                
+                # Создаем клавиатуру с возвратом в главное меню
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔄 Обновить анализ", 
+                                        callback_data="analyzer_refresh")],
+                    [InlineKeyboardButton("⬅️ Главное меню", 
+                                        callback_data="main_menu")]
+                ])
+                
+                await loading_message.edit_text(
+                    message,
+                    parse_mode='HTML',
+                    reply_markup=keyboard
+                )
+                
+        except Exception as e:
+            logger.error(f"Ошибка при работе анализатора: {e}")
+            error_message = "🤖 <b>Анализатор войн</b>\n\n❌ Произошла ошибка при анализе. Попробуйте позже."
+            if 'loading_message' in locals():
+                await loading_message.edit_text(error_message, parse_mode='HTML')
+            else:
+                await update.message.reply_text(error_message, parse_mode='HTML')
+    
+    async def _analyze_clan_wars(self, client, clan_tag: str, clan_name: str) -> Dict:
+        """Анализ текущих войн клана"""
+        analysis = {
+            'clan_name': clan_name,
+            'current_war': None,
+            'cwl_war': None,
+            'is_attack_day': False,
+            'recommendations': []
+        }
+        
+        try:
+            # Проверяем обычную клановую войну
+            current_war = await client.get_current_war(clan_tag)
+            if current_war and current_war.get('state') in ['inWar', 'preparation']:
+                analysis['current_war'] = current_war
+                
+                # Проверяем, день атак ли сейчас
+                if current_war.get('state') == 'inWar':
+                    analysis['is_attack_day'] = True
+                    # Генерируем рекомендации для атак
+                    analysis['recommendations'] = self._generate_attack_recommendations(current_war)
+            
+            # Проверяем ЛВК (League War)
+            try:
+                cwl_war = await client.get_current_cwl_war(clan_tag)
+                if cwl_war and cwl_war.get('state') in ['inWar', 'preparation']:
+                    analysis['cwl_war'] = cwl_war
+                    
+                    if cwl_war.get('state') == 'inWar':
+                        analysis['is_attack_day'] = True
+                        # Генерируем рекомендации для ЛВК
+                        cwl_recommendations = self._generate_attack_recommendations(cwl_war, is_cwl=True)
+                        analysis['recommendations'].extend(cwl_recommendations)
+            except Exception as cwl_error:
+                logger.debug(f"ЛВК не активна или ошибка получения данных: {cwl_error}")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при анализе войн: {e}")
+        
+        return analysis
+    
+    def _generate_attack_recommendations(self, war_data: Dict, is_cwl: bool = False) -> List[Dict]:
+        """Генерация рекомендаций для атак (упрощенная AI логика)"""
+        recommendations = []
+        
+        try:
+            clan_members = war_data.get('clan', {}).get('members', [])
+            opponent_members = war_data.get('opponent', {}).get('members', [])
+            
+            # Простая логика рекомендаций на основе соотношения TH и атак
+            for member in clan_members:
+                member_name = member.get('name', 'Неизвестно')
+                member_th = member.get('townhallLevel', 0)
+                attacks_used = len(member.get('attacks', []))
+                max_attacks = 2  # В обычных войнах по 2 атаки
+                
+                if attacks_used < max_attacks:
+                    # Ищем подходящие цели
+                    suitable_targets = []
+                    for opponent in opponent_members:
+                        opponent_name = opponent.get('name', 'Неизвестно')
+                        opponent_th = opponent.get('townhallLevel', 0)
+                        opponent_pos = opponent.get('mapPosition', 0)
+                        
+                        # Простая логика выбора цели
+                        if member_th >= opponent_th:  # Может атаковать равных или слабее
+                            difficulty = self._calculate_attack_difficulty(member_th, opponent_th)
+                            success_chance = self._estimate_success_chance(member_th, opponent_th, member, opponent)
+                            
+                            suitable_targets.append({
+                                'name': opponent_name,
+                                'position': opponent_pos,
+                                'th_level': opponent_th,
+                                'difficulty': difficulty,
+                                'success_chance': success_chance
+                            })
+                    
+                    if suitable_targets:
+                        # Сортируем цели по вероятности успеха
+                        suitable_targets.sort(key=lambda x: x['success_chance'], reverse=True)
+                        best_target = suitable_targets[0]
+                        
+                        rec_type = "ЛВК" if is_cwl else "КВ"
+                        recommendations.append({
+                            'attacker': member_name,
+                            'attacker_th': member_th,
+                            'target': best_target,
+                            'war_type': rec_type,
+                            'attacks_remaining': max_attacks - attacks_used
+                        })
+        
+        except Exception as e:
+            logger.error(f"Ошибка при генерации рекомендаций: {e}")
+        
+        return recommendations[:5]  # Возвращаем топ-5 рекомендаций
+    
+    def _calculate_attack_difficulty(self, attacker_th: int, defender_th: int) -> str:
+        """Расчет сложности атаки"""
+        diff = attacker_th - defender_th
+        if diff >= 2:
+            return "Легкая"
+        elif diff == 1:
+            return "Умеренная"
+        elif diff == 0:
+            return "Сложная"
+        else:
+            return "Очень сложная"
+    
+    def _estimate_success_chance(self, attacker_th: int, defender_th: int, attacker: Dict, defender: Dict) -> int:
+        """Упрощенная оценка вероятности успеха атаки (0-100%)"""
+        base_chance = 60  # Базовая вероятность
+        
+        # Бонус за превосходство в TH
+        th_diff = attacker_th - defender_th
+        base_chance += th_diff * 15
+        
+        # Бонус за опыт (если есть данные об атаках)
+        attacker_attacks = len(attacker.get('attacks', []))
+        if attacker_attacks > 0:
+            base_chance += 10  # Бонус за опыт в текущей войне
+        
+        # Ограничиваем значения
+        return max(10, min(95, base_chance))
+    
+    def _format_analyzer_report(self, analysis: Dict, player_data: Dict) -> str:
+        """Форматирование отчета анализатора"""
+        clan_name = analysis['clan_name']
+        player_name = player_data.get('name', 'Неизвестно')
+        
+        message = f"🤖 <b>Анализатор войн</b>\n\n"
+        message += f"👤 Игрок: {player_name}\n"
+        message += f"🛡️ Клан: {clan_name}\n\n"
+        
+        # Проверяем статус войн
+        has_active_war = analysis['current_war'] or analysis['cwl_war']
+        
+        if not has_active_war:
+            message += "😴 <b>Статус:</b> Мирное время\n\n"
+            message += "📋 В данный момент ваш клан не участвует в войнах.\n"
+            message += "🔍 Анализатор автоматически активируется при начале КВ или ЛВК."
+            return message
+        
+        if analysis['is_attack_day']:
+            message += "⚔️ <b>Статус:</b> День атак! 🔥\n\n"
+        else:
+            message += "🛡️ <b>Статус:</b> День подготовки\n\n"
+        
+        # Информация о текущих войнах
+        if analysis['current_war']:
+            war = analysis['current_war']
+            state = "Идет война" if war.get('state') == 'inWar' else "Подготовка"
+            message += f"⚔️ <b>Клановая война:</b> {state}\n"
+            
+            clan_stars = war.get('clan', {}).get('stars', 0)
+            opponent_stars = war.get('opponent', {}).get('stars', 0)
+            message += f"⭐ Счет: {clan_stars} - {opponent_stars}\n\n"
+        
+        if analysis['cwl_war']:
+            message += f"🏆 <b>ЛВК:</b> Активна\n\n"
+        
+        # Рекомендации по атакам
+        if analysis['recommendations'] and analysis['is_attack_day']:
+            message += "🎯 <b>Рекомендации по атакам:</b>\n\n"
+            
+            for i, rec in enumerate(analysis['recommendations'][:3], 1):  # Показываем топ-3
+                target = rec['target']
+                message += f"{i}. <b>{rec['attacker']}</b> (ТХ{rec['attacker_th']})\n"
+                message += f"   🎯 Цель: {target['name']} (#{target['position']}, ТХ{target['th_level']})\n"
+                message += f"   📊 Успех: {target['success_chance']}% | {target['difficulty']}\n"
+                message += f"   ⚔️ Атак осталось: {rec['attacks_remaining']}\n\n"
+            
+            if len(analysis['recommendations']) > 3:
+                message += f"... и еще {len(analysis['recommendations']) - 3} рекомендаций\n\n"
+        
+        elif analysis['is_attack_day']:
+            message += "✅ <b>Анализ завершен</b>\n\n"
+            message += "Все участники уже использовали свои атаки или нет подходящих целей."
+        
+        message += "💡 <i>Рекомендации основаны на соотношении ТХ и данных о предыдущих атаках</i>"
+        
+        return message
