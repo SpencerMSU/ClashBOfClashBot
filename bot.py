@@ -46,11 +46,12 @@ class ClashBot:
     
     async def initialize(self):
         """Инициализация бота"""
-        await self._init_components()
-        
-        # Создание приложения бота
+        # Создание приложения бота сначала
         self.application = Application.builder().token(self.token).build()
         self.bot_instance = self.application.bot
+        
+        # Затем инициализация компонентов с доступным bot_instance
+        await self._init_components()
         
         # Регистрация обработчиков
         self._register_handlers()
@@ -63,30 +64,17 @@ class ClashBot:
             # Инициализация базы данных
             await self.db_service.init_db()
             
-            # Создание приложения бота для проверки токена
-            temp_app = Application.builder().token(self.token).build()
-            
-            # Проверяем валидность токена перед продолжением
+            # Проверяем валидность токена (bot_instance уже создан)
             try:
-                await temp_app.bot.get_me()
+                await self.bot_instance.get_me()
             except Exception as e:
                 logger.error(f"Неверный токен бота или проблемы с сетью: {e}")
                 raise ValueError(f"Не удается подключиться к Telegram API: {e}")
-            finally:
-                # Очищаем временное приложение
-                await temp_app.shutdown()
-            
-            # Создание основного приложения бота
-            self.application = Application.builder().token(self.token).build()
-            self.bot_instance = self.application.bot
-            
-            # Регистрация обработчиков
-            self._register_handlers()
             
             # Запуск архиватора войн
             await self._start_war_archiver()
             
-            # Запуск монитора зданий
+            # Запуск монитора зданий (теперь с доступным bot_instance)
             await self._start_building_monitor()
             
             logger.info("Компоненты бота успешно инициализированы")
