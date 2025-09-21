@@ -209,8 +209,8 @@ class ClashBot:
     async def run(self):
         """Запуск бота"""
         try:
-            # Initialize components first to catch configuration errors early
-            await self._init_components()
+            # Initialize bot application and instance first
+            await self.initialize()
             
             # Initialize the telegram application
             await self.application.initialize()
