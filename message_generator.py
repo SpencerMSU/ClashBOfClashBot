@@ -1511,6 +1511,15 @@ class MessageGenerator:
                 )
                 return
             
+            # Проверяем статус подписки для определения частоты проверки
+            check_interval_text = "каждые 3 минуты"
+            
+            if subscription and subscription.is_active and not subscription.is_expired():
+                if subscription.subscription_type.startswith("proplus"):
+                    check_interval_text = "каждые 30 секунд"
+                elif subscription.subscription_type.startswith("premium"):
+                    check_interval_text = "каждые 60 секунд"
+            
             # Проверяем статус отслеживания
             from building_monitor import BuildingMonitor
             building_monitor = context.bot_data.get('building_monitor', None)
@@ -1522,10 +1531,21 @@ class MessageGenerator:
             message = (
                 f"🏗️ <b>Отслеживание улучшений зданий</b>\n\n"
                 f"📋 <b>Как это работает:</b>\n"
-                f"• Чекер каждые 3 минуты проверяет состояние всех зданий, героев и войск в игре\n"
+                f"• Чекер {check_interval_text} проверяет состояние всех зданий, героев, питомцев, стен и деревни строителя\n"
                 f"• При обнаружении изменений (улучшений) отправляет уведомления\n"
                 f"• Работает по сравнению с первоначальным сканом при добавлении профиля\n"
                 f"• Отслеживает все привязанные к аккаунту профили\n\n"
+                f"🏗️ <b>Что отслеживается:</b>\n"
+                f"• Все здания основной деревни\n"
+                f"• Герои и их уровни\n"
+                f"• Снаряжение героев/питомцы\n"
+                f"• Войска и заклинания (улучшения в лаборатории)\n"
+                f"• Стены\n"
+                f"• Деревня строителя и её улучшения\n\n"
+                f"⏱️ <b>Частота проверки:</b>\n"
+                f"• Обычные пользователи: каждые 3 минуты\n"
+                f"• Премиум: каждые 60 секунд\n"
+                f"• Про Плюс: каждые 30 секунд\n\n"
                 f"⚠️ <b>Важно:</b>\n"
                 f"• Функция доступна только при наличии ДЕЙСТВУЮЩЕЙ подписки\n"
                 f"• При истечении подписки уведомления ПЕРЕСТАНУТ отправляться\n"
@@ -2017,3 +2037,145 @@ class MessageGenerator:
         """Закрытие ресурсов"""
         if self.payment_service:
             await self.payment_service.close()
+    
+    async def handle_community_center_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка меню центра сообщества"""
+        try:
+            message = (
+                f"🏛️ <b>Центр сообщества</b>\n\n"
+                f"Добро пожаловать в центр сообщества! Здесь вы можете найти полезную информацию "
+                f"о игре Clash of Clans.\n\n"
+                f"📋 <b>Доступные разделы:</b>\n"
+                f"• 🏗️ Стоимости строений - узнайте стоимость и время улучшения всех зданий\n"
+                f"• Больше разделов будет добавлено в будущем!"
+            )
+            
+            keyboard = Keyboards.community_center_menu()
+            
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(
+                    text=message,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text(
+                    text=message,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке меню центра сообщества: {e}")
+            error_message = "❌ Произошла ошибка при загрузке центра сообщества."
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(error_message)
+            else:
+                await update.message.reply_text(error_message)
+    
+    async def handle_building_costs_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка меню стоимости строений"""
+        try:
+            message = (
+                f"🏗️ <b>Стоимости строений</b>\n\n"
+                f"Выберите категорию зданий, чтобы узнать стоимость и время улучшения:\n\n"
+                f"🏰 <b>Оборона</b> - оборонительные здания\n"
+                f"⚔️ <b>Армия</b> - военные здания\n"
+                f"💎 <b>Ресурсы</b> - добывающие и хранящие здания\n"
+                f"👑 <b>Герои</b> - информация об улучшении героев\n"
+                f"🔨 <b>Деревня строителя</b> - здания второй деревни"
+            )
+            
+            keyboard = Keyboards.building_costs_menu()
+            
+            await update.callback_query.edit_message_text(
+                text=message,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке меню стоимости строений: {e}")
+            await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке меню.")
+    
+    async def handle_building_category_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, category: str):
+        """Обработка меню категории зданий"""
+        try:
+            category_names = {
+                "defense": "🏰 Оборонительные здания",
+                "army": "⚔️ Военные здания",
+                "resources": "💎 Ресурсные здания",
+                "heroes": "👑 Герои",
+                "builder": "🔨 Деревня строителя"
+            }
+            
+            category_name = category_names.get(category, "Неизвестная категория")
+            
+            message = (
+                f"<b>{category_name}</b>\n\n"
+                f"Выберите здание, чтобы посмотреть подробную информацию "
+                f"о стоимости и времени улучшения:"
+            )
+            
+            keyboard = Keyboards.building_category_menu(category)
+            
+            await update.callback_query.edit_message_text(
+                text=message,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке категории зданий: {e}")
+            await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке категории.")
+    
+    async def handle_building_detail_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, building_id: str):
+        """Обработка детальной информации о здании"""
+        try:
+            from building_data import get_building_info, format_currency, format_time
+            
+            building_info = get_building_info(building_id)
+            
+            if not building_info:
+                await update.callback_query.edit_message_text("❌ Информация о здании не найдена.")
+                return
+            
+            building_name = building_info.get("name", "Неизвестное здание")
+            levels = building_info.get("levels", {})
+            
+            if not levels:
+                await update.callback_query.edit_message_text("❌ Данные об уровнях не найдены.")
+                return
+            
+            message = f"🏗️ <b>{building_name}</b>\n\n"
+            
+            # Показываем информацию о всех уровнях (ограничиваем по длине сообщения)
+            level_count = 0
+            for level, data in sorted(levels.items()):
+                if level_count >= 15:  # Ограничиваем количество уровней
+                    message += f"\n... и ещё {len(levels) - level_count} уровней"
+                    break
+                
+                cost = format_currency(data["cost"], data["currency"])
+                time_str = format_time(data["time"])
+                th_level = data.get("th_level", "?")
+                
+                message += f"<b>Уровень {level}:</b> {cost}, {time_str} (ТХ {th_level})\n"
+                level_count += 1
+            
+            message += f"\n💡 <i>Всего уровней: {len(levels)}</i>"
+            
+            # Кнопка возврата
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Назад", callback_data=Keyboards.BUILDING_COSTS_CALLBACK)]
+            ])
+            
+            await update.callback_query.edit_message_text(
+                text=message,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке информации о здании: {e}")
+            await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке информации о здании.")

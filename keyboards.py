@@ -28,6 +28,7 @@ class Keyboards:
     CLAN_CURRENT_WAR_BTN = "⚔️ Текущая КВ"
     SUBSCRIPTION_BTN = "💎 Премиум подписка"
     LINKED_CLANS_BTN = "🔗 Привязанные кланы"
+    COMMUNITY_CENTER_BTN = "🏛️ Центр сообщества"
     
     # Константы для callback-данных
     MEMBERS_CALLBACK = "members"
@@ -57,13 +58,17 @@ class Keyboards:
     LINKED_CLAN_SELECT_CALLBACK = "linked_clan_select"
     LINKED_CLAN_ADD_CALLBACK = "linked_clan_add"
     LINKED_CLAN_DELETE_CALLBACK = "linked_clan_delete"
+    COMMUNITY_CENTER_CALLBACK = "community_center"
+    BUILDING_COSTS_CALLBACK = "building_costs"
+    BUILDING_CATEGORY_CALLBACK = "building_category"
+    BUILDING_DETAIL_CALLBACK = "building_detail"
     
     @staticmethod
     def main_menu() -> ReplyKeyboardMarkup:
         """Главное меню бота"""
         keyboard = [
             [KeyboardButton(Keyboards.PROFILE_BTN), KeyboardButton(Keyboards.CLAN_BTN)],
-            [KeyboardButton(Keyboards.NOTIFICATIONS_BTN)]
+            [KeyboardButton(Keyboards.NOTIFICATIONS_BTN), KeyboardButton(Keyboards.COMMUNITY_CENTER_BTN)]
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
@@ -422,7 +427,7 @@ class Keyboards:
         if has_subscription:
             keyboard.append([InlineKeyboardButton("💎 Продлить подписку", 
                                                 callback_data=Keyboards.SUBSCRIPTION_EXTEND_CALLBACK)])
-            keyboard.append([InlineKeyboardButton("👑 Меню премиум", 
+            keyboard.append([InlineKeyboardButton("🔔 Уведомления", 
                                                 callback_data=Keyboards.PREMIUM_MENU_CALLBACK)])
         else:
             keyboard.append([InlineKeyboardButton("💎 Оформить подписку", 
@@ -579,6 +584,106 @@ class Keyboards:
             InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")
         ])
         
+        return InlineKeyboardMarkup(keyboard)
+
+
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def community_center_menu() -> InlineKeyboardMarkup:
+        """Меню центра сообщества"""
+        keyboard = [
+            [InlineKeyboardButton("🏗️ Стоимости строений", 
+                                callback_data=Keyboards.BUILDING_COSTS_CALLBACK)],
+            [InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def building_costs_menu() -> InlineKeyboardMarkup:
+        """Меню выбора категории зданий"""
+        keyboard = [
+            [InlineKeyboardButton("🏰 Оборона", callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:defense")],
+            [InlineKeyboardButton("⚔️ Армия", callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:army")],
+            [InlineKeyboardButton("💎 Ресурсы", callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:resources")],
+            [InlineKeyboardButton("👑 Герои", callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:heroes")],
+            [InlineKeyboardButton("🔨 Деревня строителя", callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:builder")],
+            [InlineKeyboardButton("⬅️ Центр сообщества", callback_data=Keyboards.COMMUNITY_CENTER_CALLBACK)]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+    
+    @staticmethod
+    def building_category_menu(category: str) -> InlineKeyboardMarkup:
+        """Меню выбора конкретного здания в категории"""
+        keyboard = []
+        
+        if category == "defense":
+            buildings = [
+                ("🏹 Башня лучниц", "archer_tower"),
+                ("💣 Пушка", "cannon"),
+                ("🏰 Мортира", "mortar"),
+                ("✈️ Воздушная защита", "air_defense"),
+                ("🧙 Башня магов", "wizard_tower"),
+                ("💨 Воздушная метла", "air_sweeper"),
+                ("⚡ Скрытая тесла", "hidden_tesla"),
+                ("💥 Башня-бомба", "bomb_tower"),
+                ("🏹 Адский лук", "x_bow"),
+                ("🔥 Башня ада", "inferno_tower"),
+                ("🦅 Орлиная артиллерия", "eagle_artillery"),
+                ("💫 Разброс", "scattershot"),
+                ("🧱 Стены", "walls")
+            ]
+        elif category == "army":
+            buildings = [
+                ("🏺 Казарма", "army_camp"),
+                ("⚔️ Учебные казармы", "barracks"),
+                ("🔬 Лаборатория", "laboratory"),
+                ("🪄 Фабрика заклинаний", "spell_factory"),
+                ("🏰 Замок клана", "clan_castle"),
+                ("🏺 Тёмные казармы", "dark_barracks"),
+                ("🌟 Фабрика тёмных заклинаний", "dark_spell_factory")
+            ]
+        elif category == "resources":
+            buildings = [
+                ("🥇 Золотая шахта", "gold_mine"),
+                ("💜 Накопитель эликсира", "elixir_collector"),
+                ("⚫ Бур тёмного эликсира", "dark_elixir_drill"),
+                ("🏛️ Хранилище золота", "gold_storage"),
+                ("🏛️ Хранилище эликсира", "elixir_storage"),
+                ("🏛️ Хранилище тёмного эликсира", "dark_elixir_storage")
+            ]
+        elif category == "heroes":
+            buildings = [
+                ("👑 Король варваров", "barbarian_king"),
+                ("👸 Королева лучниц", "archer_queen"),
+                ("🧙‍♂️ Великий хранитель", "grand_warden"),
+                ("⚔️ Королевский чемпион", "royal_champion")
+            ]
+        elif category == "builder":
+            buildings = [
+                ("🏗️ Зал строителя", "builder_hall"),
+                ("⚔️ Казармы БД", "builder_barracks"),
+                ("🏹 Башня лучниц БД", "builder_archer_tower"),
+                ("💣 Пушка БД", "builder_cannon"),
+                ("🔥 Печь БД", "builder_firecrackers"),
+                ("⚡ Тесла БД", "builder_tesla"),
+                ("💣 Гигантская пушка БД", "giant_cannon"),
+                ("🏹 Мега тесла БД", "mega_tesla")
+            ]
+        else:
+            buildings = []
+        
+        # Добавляем кнопки для каждого здания (по 2 в ряд)
+        for i in range(0, len(buildings), 2):
+            row = []
+            for j in range(2):
+                if i + j < len(buildings):
+                    name, building_id = buildings[i + j]
+                    row.append(InlineKeyboardButton(name, 
+                                                  callback_data=f"{Keyboards.BUILDING_DETAIL_CALLBACK}:{building_id}"))
+            keyboard.append(row)
+        
+        keyboard.append([InlineKeyboardButton("⬅️ Категории", callback_data=Keyboards.BUILDING_COSTS_CALLBACK)])
         return InlineKeyboardMarkup(keyboard)
 
 

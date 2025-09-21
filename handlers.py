@@ -50,6 +50,7 @@ class MessageHandler:
             text == Keyboards.BACK_BTN or
             text == Keyboards.BACK_TO_CLAN_MENU_BTN or
             text == Keyboards.NOTIFICATIONS_BTN or
+            text == Keyboards.COMMUNITY_CENTER_BTN or
             text == Keyboards.SUBSCRIPTION_BTN or
             text == Keyboards.LINKED_CLANS_BTN or
             text.startswith(Keyboards.MY_PROFILE_PREFIX)):
@@ -136,6 +137,9 @@ class MessageHandler:
             
             elif text == Keyboards.NOTIFICATIONS_BTN:
                 await self.message_generator.handle_notifications_menu(update, context)
+            
+            elif text == Keyboards.COMMUNITY_CENTER_BTN:
+                await self.message_generator.handle_community_center_menu(update, context)
             
             elif text == Keyboards.SUBSCRIPTION_BTN:
                 await self.message_generator.handle_subscription_menu(update, context)
@@ -443,6 +447,18 @@ class CallbackHandler:
             
             elif callback_type == Keyboards.LINKED_CLAN_DELETE_CALLBACK:
                 await self._handle_linked_clan_delete(update, context, data_parts)
+            
+            elif callback_type == Keyboards.COMMUNITY_CENTER_CALLBACK:
+                await self._handle_community_center(update, context)
+            
+            elif callback_type == Keyboards.BUILDING_COSTS_CALLBACK:
+                await self._handle_building_costs(update, context)
+            
+            elif callback_type == Keyboards.BUILDING_CATEGORY_CALLBACK:
+                await self._handle_building_category(update, context, data_parts)
+            
+            elif callback_type == Keyboards.BUILDING_DETAIL_CALLBACK:
+                await self._handle_building_detail(update, context, data_parts)
             
             elif callback_type == "confirm_payment":
                 await self._handle_payment_confirmation(update, context, data_parts)
@@ -776,3 +792,27 @@ class CallbackHandler:
         
         slot_number = int(data_parts[1])
         await self.message_generator.handle_linked_clan_delete(update, context, slot_number)
+    
+    async def _handle_community_center(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка центра сообщества"""
+        await self.message_generator.handle_community_center_menu(update, context)
+    
+    async def _handle_building_costs(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка меню стоимости строений"""
+        await self.message_generator.handle_building_costs_menu(update, context)
+    
+    async def _handle_building_category(self, update: Update, context: ContextTypes.DEFAULT_TYPE, data_parts: list):
+        """Обработка выбора категории зданий"""
+        if len(data_parts) < 2:
+            return
+        
+        category = data_parts[1]
+        await self.message_generator.handle_building_category_menu(update, context, category)
+    
+    async def _handle_building_detail(self, update: Update, context: ContextTypes.DEFAULT_TYPE, data_parts: list):
+        """Обработка детальной информации о здании"""
+        if len(data_parts) < 2:
+            return
+        
+        building_id = data_parts[1]
+        await self.message_generator.handle_building_detail_menu(update, context, building_id)
