@@ -26,8 +26,8 @@ class BuildingMonitor:
         self.is_running = False
         self.task = None
         
-        # Интервал проверки - каждые 3 минуты
-        self.check_interval = 180  # 3 минуты в секундах
+        # Интервал проверки - базовый интервал (30 секунд - минимальный для про плюс)
+        self.min_check_interval = 30  # 30 секунд - минимальный интервал
         
         # Словарь для перевода названий зданий на русский
         self.building_names_ru = {
@@ -59,8 +59,20 @@ class BuildingMonitor:
             "Barbarian King": "Король варваров",
             "Archer Queen": "Королева лучниц",
             "Grand Warden": "Великий хранитель",
-            "Royal Champion": "Королевский чемпион"
+            "Royal Champion": "Королевский чемпион",
+            "Walls (стены)": "Стены",
+            "[БД] Builder Hall": "Зал строителя",
+            "[БД] League": "Лига деревни строителя",
         }
+    
+    def _get_check_interval_for_subscription(self, subscription_type: str) -> int:
+        """Определение интервала проверки по типу подписки"""
+        if subscription_type.startswith("proplus") or subscription_type.startswith("pro"):
+            return 30  # 30 секунд для Pro Plus
+        elif subscription_type.startswith("premium"):
+            return 60  # 60 секунд для Premium
+        else:
+            return 180  # 3 минуты для обычных пользователей
     
     async def start(self):
         """Запуск мониторинга зданий"""
@@ -89,8 +101,8 @@ class BuildingMonitor:
             try:
                 await self._check_all_trackers()
                 
-                # Ждем до следующей проверки (5 минут)
-                await asyncio.sleep(self.check_interval)
+                # Ждем до следующей проверки (минимальный интервал)
+                await asyncio.sleep(self.min_check_interval)
                 
             except asyncio.CancelledError:
                 break
@@ -104,13 +116,30 @@ class BuildingMonitor:
             trackers = await self.db_service.get_active_building_trackers()
             logger.info(f"[Монитор зданий] Проверка {len(trackers)} активных отслеживателей")
             
+            current_time = datetime.now()
+            
             for tracker in trackers:
-                # Проверяем, что у пользователя есть активная премиум подписка
+                # Проверяем, что у пользователя есть активная подписка
                 subscription = await self.db_service.get_subscription(tracker.telegram_id)
                 if not subscription or not subscription.is_active or subscription.is_expired():
                     logger.info(f"Отключение отслеживания для пользователя {tracker.telegram_id} - нет активной подписки")
                     await self._deactivate_tracker(tracker.telegram_id)
                     continue
+                
+                # Определяем интервал проверки для данного пользователя
+                check_interval = self._get_check_interval_for_subscription(subscription.subscription_type)
+                
+                # Проверяем, прошло ли достаточно времени с последней проверки
+                if tracker.last_check:
+                    try:
+                        last_check_time = datetime.fromisoformat(tracker.last_check)
+                        time_since_last_check = (current_time - last_check_time).total_seconds()
+                        
+                        if time_since_last_check < check_interval:
+                            continue  # Ещё не время проверять этого пользователя
+                    except ValueError:
+                        # Если формат времени неверный, продолжаем проверку
+                        pass
                 
                 await self._check_player_buildings(tracker)
                 
@@ -173,6 +202,12 @@ class BuildingMonitor:
                     if 'name' in hero and 'level' in hero:
                         buildings_data[hero['name']] = hero['level']
             
+            # Извлекаем данные о питомцах
+            if 'heroEquipment' in player_data:
+                for equipment in player_data['heroEquipment']:
+                    if 'name' in equipment and 'level' in equipment:
+                        buildings_data[f"{equipment['name']} (снаряжение)"] = equipment['level']
+            
             # Извлекаем данные о войсках (войска могут улучшаться в лаборатории)
             if 'troops' in player_data:
                 for troop in player_data['troops']:
@@ -184,6 +219,24 @@ class BuildingMonitor:
                 for spell in player_data['spells']:
                     if 'name' in spell and 'level' in spell:
                         buildings_data[f"{spell['name']} (заклинание)"] = spell['level']
+            
+            # Извлекаем данные о стенах (по общему уровню)
+            if 'achievements' in player_data:
+                for achievement in player_data['achievements']:
+                    if achievement.get('name') == 'Wall Buster' and 'value' in achievement:
+                        buildings_data['Walls (стены)'] = achievement['value']
+                        break
+                        
+            # Извлекаем данные о деревне строителя
+            if 'builderHallLevel' in player_data:
+                buildings_data['[БД] Builder Hall'] = player_data['builderHallLevel']
+                
+            # Другие здания деревни строителя (если есть данные)
+            if 'builderBaseLeague' in player_data:
+                # Уровень лиги деревни строителя как индикатор прогресса
+                league_name = player_data['builderBaseLeague'].get('name', 'Unranked')
+                if league_name != 'Unranked':
+                    buildings_data['[БД] League'] = league_name
             
             snapshot = BuildingSnapshot(
                 player_tag=player_tag,
@@ -217,6 +270,12 @@ class BuildingMonitor:
                     if 'name' in hero and 'level' in hero:
                         current_buildings[hero['name']] = hero['level']
             
+            # Снаряжение героев/питомцы
+            if 'heroEquipment' in current_data:
+                for equipment in current_data['heroEquipment']:
+                    if 'name' in equipment and 'level' in equipment:
+                        current_buildings[f"{equipment['name']} (снаряжение)"] = equipment['level']
+            
             # Войска
             if 'troops' in current_data:
                 for troop in current_data['troops']:
@@ -229,14 +288,37 @@ class BuildingMonitor:
                     if 'name' in spell and 'level' in spell:
                         current_buildings[f"{spell['name']} (заклинание)"] = spell['level']
             
+            # Стены
+            if 'achievements' in current_data:
+                for achievement in current_data['achievements']:
+                    if achievement.get('name') == 'Wall Buster' and 'value' in achievement:
+                        current_buildings['Walls (стены)'] = achievement['value']
+                        break
+                        
+            # Деревня строителя
+            if 'builderHallLevel' in current_data:
+                current_buildings['[БД] Builder Hall'] = current_data['builderHallLevel']
+                
+            if 'builderBaseLeague' in current_data:
+                league_name = current_data['builderBaseLeague'].get('name', 'Unranked')
+                if league_name != 'Unranked':
+                    current_buildings['[БД] League'] = league_name
+            
             # Сравниваем уровни
             for building_name, current_level in current_buildings.items():
                 old_level = old_buildings.get(building_name, 0)
                 
-                if current_level > old_level:
+                if isinstance(current_level, int) and current_level > old_level:
                     upgrades.append(BuildingUpgrade(
                         building_name=building_name,
                         old_level=old_level,
+                        new_level=current_level
+                    ))
+                elif isinstance(current_level, str) and current_level != old_buildings.get(building_name, ''):
+                    # Для строковых значений (например, лиги)
+                    upgrades.append(BuildingUpgrade(
+                        building_name=building_name,
+                        old_level=old_buildings.get(building_name, 'Неизвестно'),
                         new_level=current_level
                     ))
             
