@@ -495,6 +495,9 @@ class CallbackHandler:
                 await query.edit_message_text("Главное меню:")
                 await query.message.reply_text("Выберите действие:", 
                                               reply_markup=Keyboards.main_menu())
+            
+            elif callback_type == "analyzer_refresh":
+                await self._handle_analyzer_refresh(update, context)
 
             else:
                 logger.warning(f"Неизвестный callback тип: {callback_type}")
@@ -877,3 +880,13 @@ class CallbackHandler:
         sort_type = data_parts[2]
         page = int(data_parts[3])
         await self.message_generator.handle_achievements_menu(update, context, player_tag, page, sort_type)
+    
+    async def _handle_analyzer_refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка обновления анализатора ИИ"""
+        try:
+            # Получаем текущего пользователя для анализа
+            user_id = update.effective_user.id
+            await self.message_generator.handle_ai_analyzer(update, context, user_id)
+        except Exception as e:
+            logger.error(f"Ошибка при обновлении анализатора: {e}")
+            await update.callback_query.edit_message_text("❌ Произошла ошибка при обновлении анализа.")
