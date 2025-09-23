@@ -1668,13 +1668,8 @@ class MessageGenerator:
                 return
             
             # Проверяем статус подписки для определения частоты проверки
-            check_interval_text = "каждые 3 минуты"
-            
-            if subscription and subscription.is_active and not subscription.is_expired():
-                if subscription.subscription_type.startswith("proplus"):
-                    check_interval_text = "каждые 30 секунд"
-                elif subscription.subscription_type.startswith("premium"):
-                    check_interval_text = "каждые 60 секунд"
+            # Согласно политике фан контента SuperCell - все аккаунты проверяются каждые 1.5 минуты
+            check_interval_text = "каждые 1.5 минуты"
             
             # Проверяем статус отслеживания
             from building_monitor import BuildingMonitor
@@ -1699,9 +1694,7 @@ class MessageGenerator:
                 f"• Стены\n"
                 f"• Деревня строителя и её улучшения\n\n"
                 f"⏱️ <b>Частота проверки:</b>\n"
-                f"• Обычные пользователи: каждые 3 минуты\n"
-                f"• Премиум: каждые 60 секунд\n"
-                f"• Про Плюс: каждые 30 секунд\n\n"
+                f"• Все пользователи: каждые 1.5 минуты (согласно политике SuperCell)\n\n"
                 f"⚠️ <b>Важно:</b>\n"
                 f"• Функция доступна только при наличии ДЕЙСТВУЮЩЕЙ подписки\n"
                 f"• При истечении подписки уведомления ПЕРЕСТАНУТ отправляться\n"
@@ -1778,7 +1771,7 @@ class MessageGenerator:
                         "🟢 Отслеживание улучшений активировано!\n\n"
                         f"📊 Отслеживается профилей: {profile_count}\n"
                         "📋 Создан первый снимок ваших зданий.\n"
-                        "🔄 Проверка изменений будет происходить каждые 3 минуты.\n"
+                        "🔄 Проверка изменений будет происходить каждые 1.5 минуты.\n"
                         "🔔 Вы получите уведомление при любом улучшении."
                     )
                     if profile_count > 1:
@@ -2511,19 +2504,48 @@ class MessageGenerator:
             achievements = []
         
         # Сортировка достижений
-        if sort_type == "progress":
-            # Сортировка по прогрессу (процент завершения)
-            achievements = sorted(achievements, key=lambda x: (x.get('value', 0) / max(x.get('target', 1), 1)) if x else 0, reverse=True)
-        elif sort_type == "profitability":
-            # Сортировка по прибыльности (награда в гемах)
-            achievements = sorted(achievements, key=lambda x: x.get('completionInfo', {}).get('gems', 0) if x else 0, reverse=True)
+        try:
+            if sort_type == "progress":
+                # Сортировка по прогрессу (процент завершения)
+                def safe_progress_key(x):
+                    if not x or not isinstance(x, dict):
+                        return 0
+                    value = x.get('value', 0)
+                    target = x.get('target', 1)
+                    if not isinstance(value, (int, float)) or not isinstance(target, (int, float)):
+                        return 0
+                    return value / max(target, 1)
+                
+                achievements = sorted(achievements, key=safe_progress_key, reverse=True)
+            elif sort_type == "profitability":
+                # Сортировка по прибыльности (награда в гемах)
+                def safe_gems_key(x):
+                    if not x or not isinstance(x, dict):
+                        return 0
+                    completion_info = x.get('completionInfo', {})
+                    if not isinstance(completion_info, dict):
+                        return 0
+                    gems = completion_info.get('gems', 0)
+                    return gems if isinstance(gems, (int, float)) else 0
+                
+                achievements = sorted(achievements, key=safe_gems_key, reverse=True)
+        except Exception as e:
+            logger.error(f"Ошибка при сортировке достижений: {e}")
+            # Если сортировка не удалась, используем исходный порядок
         
         # Пагинация
         items_per_page = 5
-        total_pages = (len(achievements) + items_per_page - 1) // items_per_page
+        total_pages = max(1, (len(achievements) + items_per_page - 1) // items_per_page) if achievements else 1
+        
+        # Защита от неверного номера страницы
+        if page < 1:
+            page = 1
+        elif page > total_pages:
+            page = total_pages
+            
         start_idx = (page - 1) * items_per_page
         end_idx = start_idx + items_per_page
-        page_achievements = achievements[start_idx:end_idx]
+        page_achievements = achievements[start_idx:end_idx] if achievements else []
         
         sort_name = "прогрессу" if sort_type == "progress" else "прибыльности"
         
@@ -2533,45 +2555,69 @@ class MessageGenerator:
             f"📄 Страница {page} из {total_pages}\n\n"
         )
         
+        if not achievements:
+            message += "❌ У игрока нет доступных достижений или они не загружены."
+            return message, total_pages
+        
         if not page_achievements:
             message += "❌ На этой странице нет достижений."
             return message, total_pages
         
         for i, achievement in enumerate(page_achievements, 1):
-            name = achievement.get('name', 'Неизвестно')
-            value = achievement.get('value', 0)
-            target = achievement.get('target', 0)
-            
-            # Вычисляем процент прогресса
-            progress_percent = (value / max(target, 1)) * 100
-            
-            # Статус достижения
-            if value >= target:
-                status = "✅"
-                progress_bar = "🟩🟩🟩🟩🟩"
-            else:
-                status = "⏳"
-                filled_blocks = int((progress_percent / 100) * 5)
-                progress_bar = "🟩" * filled_blocks + "⬜" * (5 - filled_blocks)
-            
-            # Информация о награде
-            completion_info = achievement.get('completionInfo', {})
-            gems = completion_info.get('gems', 0)
-            xp = completion_info.get('experienceReward', 0)
-            
-            message += f"{status} <b>{name}</b>\n"
-            message += f"   📊 {progress_bar} {progress_percent:.1f}%\n"
-            message += f"   🎯 {value:,}/{target:,}\n"
-            
-            if gems > 0 or xp > 0:
-                rewards = []
-                if gems > 0:
-                    rewards.append(f"💎 {gems}")
-                if xp > 0:
-                    rewards.append(f"⭐ {xp}")
-                message += f"   🎁 {' | '.join(rewards)}\n"
-            
-            message += "\n"
+            try:
+                # Проверяем, что achievement не None и является словарем
+                if not achievement or not isinstance(achievement, dict):
+                    continue
+                    
+                name = achievement.get('name', 'Неизвестно')
+                value = achievement.get('value', 0)
+                target = achievement.get('target', 0)
+                
+                # Безопасная проверка типов
+                if not isinstance(value, (int, float)):
+                    value = 0
+                if not isinstance(target, (int, float)):
+                    target = 0
+                
+                # Вычисляем процент прогресса
+                progress_percent = (value / max(target, 1)) * 100
+                
+                # Статус достижения
+                if value >= target:
+                    status = "✅"
+                    progress_bar = "🟩🟩🟩🟩🟩"
+                else:
+                    status = "⏳"
+                    filled_blocks = int((progress_percent / 100) * 5)
+                    progress_bar = "🟩" * filled_blocks + "⬜" * (5 - filled_blocks)
+                
+                # Информация о награде
+                completion_info = achievement.get('completionInfo', {})
+                if isinstance(completion_info, dict):
+                    gems = completion_info.get('gems', 0)
+                    xp = completion_info.get('experienceReward', 0)
+                else:
+                    gems = 0
+                    xp = 0
+                
+                message += f"{status} <b>{name}</b>\n"
+                message += f"   📊 {progress_bar} {progress_percent:.1f}%\n"
+                message += f"   🎯 {value:,}/{target:,}\n"
+                
+                if gems > 0 or xp > 0:
+                    rewards = []
+                    if gems > 0:
+                        rewards.append(f"💎 {gems}")
+                    if xp > 0:
+                        rewards.append(f"⭐ {xp}")
+                    message += f"   🎁 {' | '.join(rewards)}\n"
+                
+                message += "\n"
+                
+            except Exception as e:
+                logger.error(f"Ошибка при обработке достижения {i}: {e}")
+                # Пропускаем проблемное достижение
+                continue
         
         return message, total_pages
     

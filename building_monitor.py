@@ -26,8 +26,8 @@ class BuildingMonitor:
         self.is_running = False
         self.task = None
         
-        # Интервал проверки - базовый интервал (30 секунд - минимальный для про плюс)
-        self.min_check_interval = 30  # 30 секунд - минимальный интервал
+        # Интервал проверки - базовый интервал (90 секунд - для соответствия политике SuperCell)
+        self.min_check_interval = 90  # 90 секунд (1.5 минуты) - интервал для всех пользователей
         
         # Словарь для перевода названий зданий на русский
         self.building_names_ru = {
@@ -67,12 +67,9 @@ class BuildingMonitor:
     
     def _get_check_interval_for_subscription(self, subscription_type: str) -> int:
         """Определение интервала проверки по типу подписки"""
-        if subscription_type.startswith("proplus") or subscription_type.startswith("pro"):
-            return 30  # 30 секунд для Pro Plus
-        elif subscription_type.startswith("premium"):
-            return 60  # 60 секунд для Premium
-        else:
-            return 180  # 3 минуты для обычных пользователей
+        # Согласно политике фан контента SuperCell - для всех аккаунтов с включенными уведомлениями
+        # проверка улучшений строений происходит раз в 1.5 минуты (90 секунд)
+        return 90  # 90 секунд (1.5 минуты) для всех пользователей
     
     async def start(self):
         """Запуск мониторинга зданий"""
@@ -348,6 +345,11 @@ class BuildingMonitor:
                     player_name = player_tag
             
             for upgrade in upgrades:
+                # Фильтруем уведомления о стенах (заборах) - только для специального пользователя
+                if upgrade.building_name == "Walls (стены)" and telegram_id != 5545099444:
+                    logger.info(f"Пропущено уведомление о стенах для пользователя {telegram_id} (не разрешено согласно политике)")
+                    continue
+                
                 # Переводим название на русский
                 building_name_ru = self.building_names_ru.get(upgrade.building_name, upgrade.building_name)
                 
