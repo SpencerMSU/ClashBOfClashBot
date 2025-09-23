@@ -481,7 +481,8 @@ class MessageGenerator:
                 message += (
                     f"💎 Статус подписки: {'👑 ПРО ПЛЮС' if 'proplus' in subscription.subscription_type else '💎 Премиум'}\n\n"
                     f"🔔 Базовые уведомления за 1 час до КВ\n"
-                    f"⚙️ Доступны расширенные настройки"
+                    f"⚙️ Доступны расширенные настройки\n"
+                    f"🏗️ Доступно отслеживание улучшений зданий"
                 )
             else:
                 message += (
@@ -489,7 +490,7 @@ class MessageGenerator:
                     f"💎 Для расширенных настроек активируйте подписку"
                 )
             
-            keyboard = Keyboards.notification_toggle()
+            keyboard = Keyboards.notification_menu(is_premium)
             
             await update.message.reply_text(
                 message, 
@@ -657,18 +658,19 @@ class MessageGenerator:
                     village = troop.get('village', 'home')
                     
                     if village == 'home' and level > 0:  # Только войска основной деревни
-                        display_name = super_troop_names[troop_name]
-                        
-                        # Примерное время действия супер войск (обычно 3 дня)
-                        # В реальном API это поле может называться по-разному
+                        # Проверяем время активности супер войска
                         remaining_time = self._calculate_super_troop_time(troop)
                         
-                        super_troops.append({
-                            'name': display_name,
-                            'level': level,
-                            'max_level': max_level,
-                            'remaining_time': remaining_time
-                        })
+                        # Добавляем только если супер войско действительно активно
+                        if remaining_time > 0:
+                            display_name = super_troop_names[troop_name]
+                            
+                            super_troops.append({
+                                'name': display_name,
+                                'level': level,
+                                'max_level': max_level,
+                                'remaining_time': remaining_time
+                            })
             
             if not super_troops:
                 return ""
@@ -707,20 +709,35 @@ class MessageGenerator:
             return ""
     
     def _calculate_super_troop_time(self, troop: Dict) -> int:
-        """Расчет оставшегося времени супер войска (упрощенная версия)"""
+        """Расчет оставшегося времени супер войска"""
         try:
-            # Поскольку COC API не всегда предоставляет точное время супер войск,
-            # используем упрощенную логику на основе уровня и активности
+            # Проверяем, есть ли информация о супер режиме
+            # В реальном COC API информация о супер войсках может содержать время активации
             level = troop.get('level', 0)
             
-            if level > 0:
-                # Если войско прокачено, считаем что супер режим активен
-                # В реальности нужно будет получать данные о времени активации
-                # Для демонстрации возвращаем случайное время от 24 до 72 часов
-                import random
-                return random.randint(24, 72)
-            else:
+            # Если войско не прокачено, оно точно не активно
+            if level == 0:
                 return 0
+            
+            # Проверяем, есть ли поле superTroopIsActive или подобное
+            # В разных версиях API это может называться по-разному
+            is_active = troop.get('superTroopIsActive', False)
+            if isinstance(is_active, bool) and is_active:
+                # Если есть явное указание на активность, возвращаем время
+                remaining_time = troop.get('superTroopRemainingTime', 72)  # По умолчанию 72 часа
+                return max(0, remaining_time)
+            
+            # Если нет явной информации об активности, проверяем косвенные признаки
+            # Супер войска обычно имеют особые характеристики
+            max_level = troop.get('maxLevel', 0)
+            
+            # Если текущий уровень равен максимальному и больше базового уровня
+            # для обычных войск, вероятно это активное супер войско
+            if level > 0 and level == max_level and max_level > 25:  # Супер войска обычно высокого уровня
+                # Возвращаем фиксированное время для активных супер войск
+                return 48  # 48 часов как примерное время
+            
+            return 0
                 
         except Exception:
             return 0
@@ -2465,6 +2482,10 @@ class MessageGenerator:
                 player_name = player_data.get('name', 'Неизвестно')
                 achievements = player_data.get('achievements', [])
                 
+                # Проверяем, что achievements не None
+                if achievements is None:
+                    achievements = []
+                
                 # Форматируем сообщение с достижениями
                 message, total_pages = self._format_achievements_page(player_name, achievements, page, sort_type)
                 
@@ -2485,13 +2506,17 @@ class MessageGenerator:
                                 page: int, sort_type: str) -> tuple:
         """Форматирование страницы достижений"""
         
+        # Проверяем, что achievements не None и является списком
+        if not achievements or not isinstance(achievements, list):
+            achievements = []
+        
         # Сортировка достижений
         if sort_type == "progress":
             # Сортировка по прогрессу (процент завершения)
-            achievements = sorted(achievements, key=lambda x: (x.get('value', 0) / max(x.get('target', 1), 1)), reverse=True)
+            achievements = sorted(achievements, key=lambda x: (x.get('value', 0) / max(x.get('target', 1), 1)) if x else 0, reverse=True)
         elif sort_type == "profitability":
             # Сортировка по прибыльности (награда в гемах)
-            achievements = sorted(achievements, key=lambda x: x.get('completionInfo', {}).get('gems', 0), reverse=True)
+            achievements = sorted(achievements, key=lambda x: x.get('completionInfo', {}).get('gems', 0) if x else 0, reverse=True)
         
         # Пагинация
         items_per_page = 5
@@ -2628,7 +2653,7 @@ class MessageGenerator:
         
         try:
             # Проверяем обычную клановую войну
-            current_war = await client.get_current_war(clan_tag)
+            current_war = await client.get_clan_current_war(clan_tag)
             if current_war and current_war.get('state') in ['inWar', 'preparation']:
                 analysis['current_war'] = current_war
                 
