@@ -106,8 +106,29 @@ class MessageHandler:
                 await self.message_generator.handle_profile_manager_request(update, context)
             
             elif text == Keyboards.CLAN_BTN:
+                # Получаем информацию о пользователе для показа кнопки "Мой клан"
+                chat_id = update.effective_chat.id
+                user = await self.message_generator.db_service.find_user(chat_id)
+                
+                player_name = None
+                has_premium = False
+                profile_count = 0
+                
+                if user:
+                    # Получаем информацию об игроке
+                    async with self.message_generator.coc_client as client:
+                        player_data = await client.get_player_info(user.player_tag)
+                        if player_data:
+                            player_name = player_data.get('name')
+                    
+                    # Проверяем премиум статус
+                    has_premium = user.has_premium if hasattr(user, 'has_premium') else False
+                    
+                    # Для простоты считаем что у пользователя 1 профиль если он привязан
+                    profile_count = 1 if user.player_tag else 0
+                
                 await update.message.reply_text("Меню клана:", 
-                                               reply_markup=Keyboards.clan_menu())
+                                               reply_markup=Keyboards.clan_menu(player_name, has_premium, profile_count))
             
             elif text == Keyboards.LINK_ACC_BTN:
                 context.user_data['state'] = UserState.AWAITING_PLAYER_TAG_TO_LINK
