@@ -110,13 +110,20 @@ class Keyboards:
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     @staticmethod
-    def clan_menu() -> ReplyKeyboardMarkup:
+    def clan_menu(player_name: Optional[str] = None, has_premium: bool = False, 
+                  profile_count: int = 0) -> ReplyKeyboardMarkup:
         """Меню клана"""
         keyboard = [
             [KeyboardButton(Keyboards.SEARCH_CLAN_BTN)],
-            [KeyboardButton(Keyboards.LINKED_CLANS_BTN)],
-            [KeyboardButton(Keyboards.BACK_BTN)]
+            [KeyboardButton(Keyboards.LINKED_CLANS_BTN)]
         ]
+        
+        # Добавляем кнопку "Мой клан" если пользователь привязал аккаунт
+        if player_name or (has_premium and profile_count > 0):
+            keyboard.append([KeyboardButton(Keyboards.MY_CLAN_BTN)])
+        
+        keyboard.append([KeyboardButton(Keyboards.BACK_BTN)])
+        
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     @staticmethod
