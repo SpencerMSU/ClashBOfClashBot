@@ -890,8 +890,9 @@ class CallbackHandler:
                 '🤖 <b>Анализатор войн</b>\n\n🚧 <b>В разработке</b>\n\nАнализатор находится в стадии разработки.\nКогда-то он будет, но не сейчас.\n\nСледите за обновлениями!')
             
             # Создаем клавиатуру с возвратом в главное меню
+            back_text = translation_manager.get_text(update, 'back_to_main_menu', "⬅️ Главное меню")
             keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")]
+                [InlineKeyboardButton(back_text, callback_data="main_menu")]
             ])
             
             await update.callback_query.edit_message_text(

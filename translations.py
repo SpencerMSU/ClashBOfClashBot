@@ -24,6 +24,16 @@ class TranslationManager:
                 'analyzer_coming_soon': '🤖 <b>Анализатор войн</b>\n\n🚧 <b>В разработке</b>\n\nАнализатор находится в стадии разработки.\nКогда-то он будет, но не сейчас.\n\nСледите за обновлениями!',
                 'analyzer_refresh_error': '🤖 <b>Анализатор войн</b>\n\n🚧 Функция временно недоступна.\nПопробуйте позже.',
                 
+                # Common Error Messages
+                'generic_error': '❌ Произошла ошибка. Попробуйте позже.',
+                'loading_error': '❌ Произошла ошибка при загрузке данных.',
+                'player_not_found': '❌ Игрок не найден.',
+                'clan_not_found': '❌ Клан не найден.',
+                
+                # Button Text
+                'back_to_main_menu': '⬅️ Главное меню',
+                'back_to_clan': '⬅️ Назад к клану',
+                
                 # Achievement Names (Russian translations)
                 'achievement_names': {
                     'Bigger Coffers': 'Большие Сундуки',
@@ -81,6 +91,16 @@ class TranslationManager:
                 # Analyzer Messages
                 'analyzer_coming_soon': '🤖 <b>War Analyzer</b>\n\n🚧 <b>Under Development</b>\n\nThe analyzer is under development.\nSomeday it will be, but not now.\n\nStay tuned for updates!',
                 'analyzer_refresh_error': '🤖 <b>War Analyzer</b>\n\n🚧 Feature temporarily unavailable.\nTry again later.',
+                
+                # Common Error Messages
+                'generic_error': '❌ An error occurred. Please try again later.',
+                'loading_error': '❌ Error loading data.',
+                'player_not_found': '❌ Player not found.',
+                'clan_not_found': '❌ Clan not found.',
+                
+                # Button Text
+                'back_to_main_menu': '⬅️ Main Menu',
+                'back_to_clan': '⬅️ Back to clan',
                 
                 # Achievement Names (English - original names)
                 'achievement_names': {}  # English names stay as is

@@ -2483,7 +2483,9 @@ class MessageGenerator:
                 player_data = await client.get_player_info(player_tag)
                 
                 if not player_data:
-                    await update.callback_query.edit_message_text("❌ Игрок не найден.")
+                    from translations import translation_manager
+                    error_msg = translation_manager.get_text(update, 'player_not_found', "❌ Игрок не найден.")
+                    await update.callback_query.edit_message_text(error_msg)
                     return
                 
                 player_name = player_data.get('name', 'Неизвестно')
@@ -2507,7 +2509,9 @@ class MessageGenerator:
                 
         except Exception as e:
             logger.error(f"Ошибка при обработке достижений игрока {player_tag}: {e}")
-            await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке достижений.")
+            from translations import translation_manager
+            error_msg = translation_manager.get_text(update, 'loading_error', "❌ Произошла ошибка при загрузке достижений.")
+            await update.callback_query.edit_message_text(error_msg)
     
     def _format_achievements_page(self, update: Update, player_name: str, achievements: List[Dict], 
                                 page: int, sort_type: str) -> tuple:
