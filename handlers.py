@@ -884,9 +884,24 @@ class CallbackHandler:
     async def _handle_analyzer_refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка обновления анализатора ИИ"""
         try:
-            # Получаем текущего пользователя для анализа
-            user_id = update.effective_user.id
-            await self.message_generator.handle_ai_analyzer(update, context, user_id)
+            # Показываем сообщение о том, что функция в разработке
+            from translations import translation_manager
+            message = translation_manager.get_text(update, 'analyzer_coming_soon',
+                '🤖 <b>Анализатор войн</b>\n\n🚧 <b>В разработке</b>\n\nАнализатор находится в стадии разработки.\nКогда-то он будет, но не сейчас.\n\nСледите за обновлениями!')
+            
+            # Создаем клавиатуру с возвратом в главное меню
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")]
+            ])
+            
+            await update.callback_query.edit_message_text(
+                message,
+                parse_mode='HTML',
+                reply_markup=keyboard
+            )
         except Exception as e:
             logger.error(f"Ошибка при обновлении анализатора: {e}")
-            await update.callback_query.edit_message_text("❌ Произошла ошибка при обновлении анализа.")
+            from translations import translation_manager
+            error_message = translation_manager.get_text(update, 'analyzer_refresh_error',
+                '🤖 <b>Анализатор войн</b>\n\n🚧 Функция временно недоступна.\nПопробуйте позже.')
+            await update.callback_query.edit_message_text(error_message, parse_mode='HTML')

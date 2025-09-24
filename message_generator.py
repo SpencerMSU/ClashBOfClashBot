@@ -1358,8 +1358,22 @@ class MessageGenerator:
                 cwl_data = await client.get_clan_war_league_group(clan_tag)
                 
                 if not cwl_data:
+                    # Возвращаемся к меню клана вместо показа ошибки
+                    from translations import translation_manager
+                    message = translation_manager.get_text(update, 'cwl_not_participating', 
+                                                         "❌ Клан не участвует в текущем сезоне ЛВК.")
+                    
+                    # Создаем кнопку возврата к меню клана
+                    keyboard = InlineKeyboardMarkup([
+                        [InlineKeyboardButton(
+                            translation_manager.get_text(update, 'cwl_back_to_clan', "⬅️ Назад к клану"),
+                            callback_data="clan_info"
+                        )]
+                    ])
+                    
                     await update.callback_query.edit_message_text(
-                        "❌ Клан не участвует в текущем сезоне ЛВК."
+                        message,
+                        reply_markup=keyboard
                     )
                     return
                 
@@ -2480,7 +2494,7 @@ class MessageGenerator:
                     achievements = []
                 
                 # Форматируем сообщение с достижениями
-                message, total_pages = self._format_achievements_page(player_name, achievements, page, sort_type)
+                message, total_pages = self._format_achievements_page(update, player_name, achievements, page, sort_type)
                 
                 # Создаем клавиатуру
                 keyboard = Keyboards.achievements_menu(player_tag, page, sort_type, total_pages)
@@ -2495,7 +2509,7 @@ class MessageGenerator:
             logger.error(f"Ошибка при обработке достижений игрока {player_tag}: {e}")
             await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке достижений.")
     
-    def _format_achievements_page(self, player_name: str, achievements: List[Dict], 
+    def _format_achievements_page(self, update: Update, player_name: str, achievements: List[Dict], 
                                 page: int, sort_type: str) -> tuple:
         """Форматирование страницы достижений"""
         
@@ -2570,6 +2584,10 @@ class MessageGenerator:
                     continue
                     
                 name = achievement.get('name', 'Неизвестно')
+                # Переводим название достижения
+                from translations import translation_manager
+                translated_name = translation_manager.get_achievement_name(update, name)
+                
                 value = achievement.get('value', 0)
                 target = achievement.get('target', 0)
                 
@@ -2600,7 +2618,7 @@ class MessageGenerator:
                     gems = 0
                     xp = 0
                 
-                message += f"{status} <b>{name}</b>\n"
+                message += f"{status} <b>{translated_name}</b>\n"
                 message += f"   📊 {progress_bar} {progress_percent:.1f}%\n"
                 message += f"   🎯 {value:,}/{target:,}\n"
                 
