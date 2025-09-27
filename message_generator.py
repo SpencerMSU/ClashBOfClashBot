@@ -2510,8 +2510,17 @@ class MessageGenerator:
         except Exception as e:
             logger.error(f"Ошибка при обработке достижений игрока {player_tag}: {e}")
             from translations import translation_manager
-            error_msg = translation_manager.get_text(update, 'loading_error', "❌ Произошла ошибка при загрузке достижений.")
-            await update.callback_query.edit_message_text(error_msg)
+            error_msg = translation_manager.get_text(update, 'loading_error', "❌ Произошла ошибка при загрузке данных.")
+            try:
+                await update.callback_query.edit_message_text(error_msg)
+            except Exception as edit_error:
+                logger.error(f"Ошибка при редактировании сообщения об ошибке достижений: {edit_error}")
+                # Fallback: try to send a new message if editing fails
+                if update.effective_chat:
+                    try:
+                        await update.effective_chat.send_message(error_msg)
+                    except Exception as send_error:
+                        logger.error(f"Не удалось отправить сообщение об ошибке достижений: {send_error}")
     
     def _format_achievements_page(self, update: Update, player_name: str, achievements: List[Dict], 
                                 page: int, sort_type: str) -> tuple:
