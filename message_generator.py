@@ -1758,7 +1758,7 @@ class MessageGenerator:
             
             from building_monitor import BuildingMonitor
             building_monitor = context.bot_data.get('building_monitor', None)
-            
+
             if not building_monitor:
                 await update.callback_query.edit_message_text(
                     "❌ Сервис отслеживания временно недоступен."
@@ -2197,7 +2197,7 @@ class MessageGenerator:
             await update.callback_query.edit_message_text("Произошла ошибка при удалении клана.")
     
     async def close(self):
-        """Закрытие ресурсов"""
+
         if self.payment_service:
             await self.payment_service.close()
     

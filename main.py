@@ -19,7 +19,6 @@ logging.basicConfig(
     ]
 )
 
-# Отключаем INFO логи от HTTP библиотек
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
 logging.getLogger('telegram.ext').setLevel(logging.WARNING)

@@ -81,4 +81,4 @@ def get_policy_text() -> str:
 def get_policy_url() -> str:
     """Получить URL политики в Telegraph (заглушка)"""
     # TODO: Загрузить на Telegraph и вернуть реальный URL
-    return "https://telegra.ph/ClashBot-Policy-12-17"
+    return "https://telegra.ph/POLITIKA-ISPOLZOVANIYA-OPLATY-I-VOZVRATOV-09-27"
