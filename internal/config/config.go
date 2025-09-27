@@ -112,16 +112,16 @@ func readAPITokens(filename string) map[string]string {
 	tokens := make(map[string]string)
 
 	// First try current directory
-	filepath := filename
-	if _, err := os.Stat(filepath); os.IsNotExist(err) {
+	filePath := filename
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		// Try script directory
 		if execPath, err := os.Executable(); err == nil {
 			scriptDir := filepath.Dir(execPath)
-			filepath = filepath.Join(scriptDir, filename)
+			filePath = filepath.Join(scriptDir, filename)
 		}
 	}
 
-	file, err := os.Open(filepath)
+	file, err := os.Open(filePath)
 	if err != nil {
 		logrus.Warnf("Could not read tokens file %s: %v", filename, err)
 		return tokens
