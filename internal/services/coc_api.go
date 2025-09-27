@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -130,8 +131,12 @@ type Building struct {
 
 // GetPlayer gets player information - exact copy from get_player()
 func (coc *CocApiClient) GetPlayer(playerTag string) (*Player, error) {
-	// Wait for rate limiter
-	coc.limiter.Wait(nil)
+	// Wait for rate limiter with context
+	ctx := context.Background()
+	err := coc.limiter.Wait(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("rate limiter error: %w", err)
+	}
 
 	formattedTag := FormatPlayerTag(playerTag)
 	encodedTag := url.QueryEscape(formattedTag)
@@ -243,8 +248,12 @@ type Label struct {
 
 // GetClan gets clan information - exact copy from get_clan()
 func (coc *CocApiClient) GetClan(clanTag string) (*Clan, error) {
-	// Wait for rate limiter
-	coc.limiter.Wait(nil)
+	// Wait for rate limiter with context
+	ctx := context.Background()
+	err := coc.limiter.Wait(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("rate limiter error: %w", err)
+	}
 
 	formattedTag := FormatClanTag(clanTag)
 	encodedTag := url.QueryEscape(formattedTag)
@@ -328,8 +337,12 @@ type WarAttack struct {
 
 // GetClanCurrentWar gets current war information - exact copy from get_clan_current_war()
 func (coc *CocApiClient) GetClanCurrentWar(clanTag string) (*WarInfo, error) {
-	// Wait for rate limiter
-	coc.limiter.Wait(nil)
+	// Wait for rate limiter with context
+	ctx := context.Background()
+	err := coc.limiter.Wait(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("rate limiter error: %w", err)
+	}
 
 	formattedTag := FormatClanTag(clanTag)
 	encodedTag := url.QueryEscape(formattedTag)
