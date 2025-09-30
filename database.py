@@ -492,6 +492,90 @@ class DatabaseService:
                 
                 return []
     
+    async def get_cwl_season_donation_stats(self, season_start: str, season_end: str) -> Dict[str, int]:
+        """Получение статистики донатов игроков за сезон ЛВК"""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Get snapshots at the start and end of the season
+            async with db.execute("""
+                SELECT player_tag, donations, snapshot_time
+                FROM player_stats_snapshots
+                WHERE snapshot_time >= ? AND snapshot_time <= ?
+                ORDER BY player_tag, snapshot_time
+            """, (season_start, season_end)) as cursor:
+                rows = await cursor.fetchall()
+            
+            # Calculate donation difference for each player
+            player_donations = {}
+            player_snapshots = {}
+            
+            for row in rows:
+                player_tag = row[0]
+                donations = row[1]
+                snapshot_time = row[2]
+                
+                if player_tag not in player_snapshots:
+                    player_snapshots[player_tag] = []
+                player_snapshots[player_tag].append((snapshot_time, donations))
+            
+            # Calculate difference between first and last snapshot
+            for player_tag, snapshots in player_snapshots.items():
+                if len(snapshots) >= 2:
+                    first_donations = snapshots[0][1]
+                    last_donations = snapshots[-1][1]
+                    player_donations[player_tag] = max(0, last_donations - first_donations)
+                elif len(snapshots) == 1:
+                    player_donations[player_tag] = snapshots[0][1]
+            
+            return player_donations
+    
+    async def get_cwl_season_attack_stats(self, season_start: str, season_end: str) -> Dict[str, Dict]:
+        """Получение статистики атак игроков за сезон ЛВК"""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Get all wars in the season
+            async with db.execute("""
+                SELECT end_time, is_cwl_war
+                FROM wars
+                WHERE end_time >= ? AND end_time <= ?
+                ORDER BY end_time
+            """, (season_start, season_end)) as cursor:
+                war_rows = await cursor.fetchall()
+            
+            # Get all attacks for these wars
+            player_stats = {}
+            
+            for war_row in war_rows:
+                war_end_time = war_row[0]
+                is_cwl = bool(war_row[1])
+                
+                async with db.execute("""
+                    SELECT attacker_tag, COUNT(*) as attack_count
+                    FROM attacks
+                    WHERE war_id = ?
+                    GROUP BY attacker_tag
+                """, (war_end_time,)) as cursor:
+                    attack_rows = await cursor.fetchall()
+                
+                for attack_row in attack_rows:
+                    player_tag = attack_row[0]
+                    attack_count = attack_row[1]
+                    
+                    if player_tag not in player_stats:
+                        player_stats[player_tag] = {
+                            'cwl_attacks': 0,
+                            'regular_attacks': 0,
+                            'cwl_wars': 0,
+                            'regular_wars': 0
+                        }
+                    
+                    if is_cwl:
+                        player_stats[player_tag]['cwl_attacks'] += attack_count
+                        player_stats[player_tag]['cwl_wars'] += 1
+                    else:
+                        player_stats[player_tag]['regular_attacks'] += attack_count
+                        player_stats[player_tag]['regular_wars'] += 1
+            
+            return player_stats
+    
     async def get_war_details(self, end_time: str) -> Optional[Dict]:
         """Получение детальной информации о войне"""
         async with aiosqlite.connect(self.db_path) as db:

@@ -1574,6 +1574,209 @@ class MessageGenerator:
         
         return message
     
+    async def display_cwl_bonus_distribution(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Отображение распределения бонусов ЛВК"""
+        try:
+            clan_tag = context.user_data.get('inspecting_clan')
+            if not clan_tag:
+                await update.callback_query.edit_message_text("❌ Клан не выбран.")
+                return
+            
+            # Get clan info to determine league
+            async with self.coc_client as client:
+                clan_data = await client.get_clan_info(clan_tag)
+                
+                if not clan_data:
+                    await update.callback_query.edit_message_text("❌ Не удалось получить информацию о клане.")
+                    return
+                
+                clan_name = clan_data.get('name', 'Неизвестно')
+                
+                # Get clan league
+                war_league = clan_data.get('warLeague', {})
+                league_name = war_league.get('name', 'Неизвестно')
+                
+                # Determine number of bonus spots based on league
+                bonus_spots = self._get_bonus_spots_by_league(league_name)
+                
+                # Get current CWL season dates (approximate - from start of current month to now)
+                now = datetime.now()
+                # CWL typically starts around the 1st of the month
+                season_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                season_end = now
+                
+                # Get donation stats for the season
+                donation_stats = await self.db_service.get_cwl_season_donation_stats(
+                    season_start.isoformat(), season_end.isoformat()
+                )
+                
+                # Get attack stats for the season
+                attack_stats = await self.db_service.get_cwl_season_attack_stats(
+                    season_start.isoformat(), season_end.isoformat()
+                )
+                
+                # Get current clan members to map tags to names
+                members = clan_data.get('memberList', [])
+                member_map = {m.get('tag'): m.get('name') for m in members}
+                
+                # Calculate bonus distribution
+                distribution = self._calculate_bonus_distribution(
+                    donation_stats, attack_stats, member_map, bonus_spots
+                )
+                
+                # Format and display the message
+                message = self._format_cwl_bonus_distribution(
+                    clan_name, league_name, bonus_spots, distribution
+                )
+                
+                await update.callback_query.edit_message_text(
+                    message, parse_mode=ParseMode.MARKDOWN
+                )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при отображении распределения бонусов ЛВК: {e}")
+            await update.callback_query.edit_message_text(
+                "❌ Произошла ошибка при получении информации о распределении бонусов."
+            )
+    
+    def _get_bonus_spots_by_league(self, league_name: str) -> int:
+        """Определение количества бонусных мест по лиге"""
+        # Based on Clash of Clans CWL league bonus structure
+        league_bonuses = {
+            'Champion League I': 8,
+            'Champion League II': 7,
+            'Champion League III': 6,
+            'Master League I': 5,
+            'Master League II': 4,
+            'Master League III': 3,
+            'Crystal League I': 3,
+            'Crystal League II': 2,
+            'Crystal League III': 2,
+            'Gold League I': 2,
+            'Gold League II': 2,
+            'Gold League III': 2,
+            'Silver League I': 2,
+            'Silver League II': 2,
+            'Silver League III': 2,
+            'Bronze League I': 2,
+            'Bronze League II': 2,
+            'Bronze League III': 2,
+        }
+        return league_bonuses.get(league_name, 2)  # Default to 2 if unknown
+    
+    def _calculate_bonus_distribution(self, donation_stats: Dict[str, int], 
+                                     attack_stats: Dict[str, Dict], 
+                                     member_map: Dict[str, str],
+                                     bonus_spots: int) -> List[Dict]:
+        """Расчет распределения бонусов ЛВК"""
+        candidates = []
+        
+        # Combine all player data
+        all_player_tags = set(donation_stats.keys()) | set(attack_stats.keys())
+        
+        for player_tag in all_player_tags:
+            player_name = member_map.get(player_tag, 'Неизвестно')
+            donations = donation_stats.get(player_tag, 0)
+            attacks = attack_stats.get(player_tag, {
+                'cwl_attacks': 0,
+                'regular_attacks': 0,
+                'cwl_wars': 0,
+                'regular_wars': 0
+            })
+            
+            # Skip players who don't meet minimum regular war attacks (10)
+            if attacks['regular_attacks'] < 10:
+                continue
+            
+            candidates.append({
+                'player_tag': player_tag,
+                'player_name': player_name,
+                'donations': donations,
+                'cwl_attacks': attacks['cwl_attacks'],
+                'cwl_wars': attacks['cwl_wars'],
+                'regular_attacks': attacks['regular_attacks'],
+                'regular_wars': attacks['regular_wars']
+            })
+        
+        if not candidates:
+            return []
+        
+        # Sort to find top donator
+        sorted_by_donations = sorted(candidates, key=lambda x: x['donations'], reverse=True)
+        
+        # First spot always goes to top donator
+        distribution = []
+        if sorted_by_donations:
+            top_donator = sorted_by_donations[0]
+            distribution.append({
+                'rank': 1,
+                'player_name': top_donator['player_name'],
+                'reason': f"🎁 Топ донатов: {top_donator['donations']:,}",
+                'cwl_attacks': top_donator['cwl_attacks'],
+                'regular_attacks': top_donator['regular_attacks']
+            })
+            top_donator_tag = top_donator['player_tag']
+        else:
+            top_donator_tag = None
+        
+        # Sort remaining candidates by attack performance
+        # Priority: CWL attacks completed (7/7 > 6/7 > ...), then by regular war attacks
+        remaining_candidates = [c for c in candidates if c['player_tag'] != top_donator_tag]
+        
+        def attack_priority(candidate):
+            # Return tuple for sorting: (CWL attacks completed, regular attacks)
+            # Higher CWL attacks are better, then higher regular attacks
+            cwl_ratio = candidate['cwl_attacks']
+            return (cwl_ratio, candidate['regular_attacks'])
+        
+        sorted_by_attacks = sorted(remaining_candidates, key=attack_priority, reverse=True)
+        
+        # Fill remaining bonus spots
+        for i, candidate in enumerate(sorted_by_attacks[:bonus_spots - 1], 2):
+            distribution.append({
+                'rank': i,
+                'player_name': candidate['player_name'],
+                'reason': f"⚔️ ЛВК: {candidate['cwl_attacks']} атак, КВ: {candidate['regular_attacks']} атак",
+                'cwl_attacks': candidate['cwl_attacks'],
+                'regular_attacks': candidate['regular_attacks']
+            })
+        
+        return distribution
+    
+    def _format_cwl_bonus_distribution(self, clan_name: str, league_name: str, 
+                                      bonus_spots: int, distribution: List[Dict]) -> str:
+        """Форматирование информации о распределении бонусов ЛВК"""
+        message = f"💎 *Распределение бонусов ЛВК*\n\n"
+        message += f"🛡️ Клан: {clan_name}\n"
+        message += f"🏆 Лига: {league_name}\n"
+        message += f"📊 Доступно бонусов: {bonus_spots}\n\n"
+        
+        # Add description of the system
+        message += "📋 *Система распределения:*\n"
+        message += "1️⃣ Первое место - игрок с наибольшим количеством пожертвований за сезон\n"
+        message += "2️⃣ Остальные места - игроки с лучшими показателями атак в ЛВК\n"
+        message += "⚠️ Минимум 10 атак в обычных КВ за сезон для участия\n"
+        message += "🎯 Приоритет: больше атак ЛВК → больше атак КВ\n\n"
+        
+        if not distribution:
+            message += "📭 Нет данных о кандидатах на бонусы.\n"
+            message += "Возможные причины:\n"
+            message += "• Недостаточно данных за текущий сезон\n"
+            message += "• Никто не выполнил минимальные требования (10 атак КВ)\n"
+            return message
+        
+        message += "🎖️ *Распределение бонусных мест:*\n\n"
+        
+        for entry in distribution:
+            rank_emoji = {1: "🥇", 2: "🥈", 3: "🥉"}.get(entry['rank'], f"{entry['rank']}.")
+            message += f"{rank_emoji} {entry['player_name']}\n"
+            message += f"   {entry['reason']}\n\n"
+        
+        if len(distribution) < bonus_spots:
+            message += f"ℹ️ Осталось {bonus_spots - len(distribution)} свободных мест\n"
+        
+        return message
+    
     async def handle_premium_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка меню для премиум подписчиков"""
         chat_id = update.effective_chat.id

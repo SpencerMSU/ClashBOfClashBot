@@ -514,6 +514,9 @@ class CallbackHandler:
             elif callback_type == Keyboards.ACHIEVEMENTS_PAGE_CALLBACK:
                 await self._handle_achievements_page(update, context, data_parts)
             
+            elif callback_type == Keyboards.CWL_BONUS_DISTRIBUTION_CALLBACK:
+                await self._handle_cwl_bonus_distribution(update, context)
+            
             elif callback_type == "confirm_payment":
                 await self._handle_payment_confirmation(update, context, data_parts)
             
@@ -932,6 +935,10 @@ class CallbackHandler:
         except (ValueError, IndexError) as e:
             logger.error(f"Ошибка при разборе данных страницы достижений: {e}")
             await update.callback_query.edit_message_text("❌ Ошибка в данных запроса.")
+    
+    async def _handle_cwl_bonus_distribution(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка отображения распределения бонусов ЛВК"""
+        await self.message_generator.display_cwl_bonus_distribution(update, context)
     
     async def _handle_analyzer_refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка обновления анализатора ИИ"""
