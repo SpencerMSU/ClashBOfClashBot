@@ -69,6 +69,7 @@ class Keyboards:
     ACHIEVEMENTS_CALLBACK = "achievements"
     ACHIEVEMENTS_SORT_CALLBACK = "achievements_sort"
     ACHIEVEMENTS_PAGE_CALLBACK = "achievements_page"
+    CWL_BONUS_DISTRIBUTION_CALLBACK = "cwl_bonus_distribution"
     
     @staticmethod
     def main_menu() -> ReplyKeyboardMarkup:
@@ -134,6 +135,7 @@ class Keyboards:
             [InlineKeyboardButton("⚔️ История войн", callback_data=Keyboards.WAR_LIST_CALLBACK)],
             [InlineKeyboardButton("⚔️ Текущая война", callback_data="current_war")],
             [InlineKeyboardButton("🏆 ЛВК", callback_data="cwl_info")],
+            [InlineKeyboardButton("💎 Распределение бонусов ЛВК", callback_data=Keyboards.CWL_BONUS_DISTRIBUTION_CALLBACK)],
             [InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")]
         ]
         return InlineKeyboardMarkup(keyboard)
@@ -325,8 +327,6 @@ class Keyboards:
         keyboard = [
             [InlineKeyboardButton("📊 Статистика атак", 
                                 callback_data=f"war_attacks:{clan_tag}:{war_end_time}")],
-            [InlineKeyboardButton("🚫 Нарушения", 
-                                callback_data=f"war_violations:{clan_tag}:{war_end_time}")],
             [InlineKeyboardButton("⬅️ К списку войн", 
                                 callback_data=f"{Keyboards.WAR_LIST_CALLBACK}:{clan_tag}:recent:1")]
         ]
