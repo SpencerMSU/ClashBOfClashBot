@@ -2803,6 +2803,8 @@ class MessageGenerator:
                 # Переводим название достижения
                 from translations import translation_manager
                 translated_name = translation_manager.get_achievement_name(update, name)
+                # Получаем описание достижения
+                description = translation_manager.get_achievement_description(update, name)
                 
                 value = achievement.get('value', 0)
                 target = achievement.get('target', 0)
@@ -2835,6 +2837,8 @@ class MessageGenerator:
                     xp = 0
                 
                 message += f"{status} <b>{translated_name}</b>\n"
+                if description:
+                    message += f"   ℹ️ <i>{description}</i>\n"
                 message += f"   📊 {progress_bar} {progress_percent:.1f}%\n"
                 message += f"   🎯 {value:,}/{target:,}\n"
                 
