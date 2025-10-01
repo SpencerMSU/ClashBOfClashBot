@@ -131,7 +131,7 @@ class WarImporter:
                 # Получаем ВСЕ кланы из локации (не ограничиваем 200)
                 # API позволяет получать до 1000 кланов за раз
                 all_clans = []
-                for limit_offset in range(0, 10000, 1000):  # Получаем до 10000 кланов с каждой локации
+                for limit_offset in range(0, 1000000, 1000):  # Получаем до 10000 кланов с каждой локации
                     clans = await self._get_clans_by_location(location_id, limit=1000, offset=limit_offset)
                     
                     if not clans:
