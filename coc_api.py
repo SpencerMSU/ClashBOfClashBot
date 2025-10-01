@@ -32,6 +32,8 @@ class CocApiClient:
         self.base_url = config.COC_API_BASE_URL
         self.api_token = config.COC_API_TOKEN
         self.session = None
+        # Трекер ошибок API
+        self.api_errors = []
     
     async def __aenter__(self):
         """Асинхронный контекстный менеджер - вход"""
@@ -59,7 +61,7 @@ class CocApiClient:
         # НЕ закрываем сессию здесь, так как она может использоваться повторно
         pass
 
-    async def _make_request(self, endpoint: str) -> Optional[Dict[Any, Any]]:
+    async def _make_request(self, endpoint: str, track_errors: bool = True) -> Optional[Dict[Any, Any]]:
         """Базовый метод для выполнения HTTP запросов"""
         # Используем сессию из контекстного менеджера или создаем новую
         session_to_use = self.session
@@ -87,26 +89,55 @@ class CocApiClient:
                 if response.status == 403:
                     logger.error("ОШИБКА 403: API ключ недействителен или ваш IP изменился. "
                                "Проверьте настройки на developer.clashofclans.com")
+                    if track_errors:
+                        self._track_error(endpoint, 403, "API key invalid or IP changed")
                     return None
                 elif response.status == 404:
                     logger.warning(f"Ресурс не найден: {url}")
+                    if track_errors:
+                        self._track_error(endpoint, 404, "Resource not found")
                     return None
                 elif response.status != 200:
                     logger.error(f"HTTP {response.status} при запросе к {url}")
+                    if track_errors:
+                        self._track_error(endpoint, response.status, f"HTTP error {response.status}")
                     return None
                 
                 return await response.json()
         
         except asyncio.TimeoutError:
             logger.error(f"Таймаут при запросе к {url}")
+            if track_errors:
+                self._track_error(endpoint, 0, "Timeout error")
             return None
         except Exception as e:
             logger.error(f"Ошибка при запросе к {url}: {e}")
+            if track_errors:
+                self._track_error(endpoint, 0, str(e))
             return None
         finally:
             # Закрываем сессию только если она была создана временно
             if not self.session and session_to_use:
                 await session_to_use.close()
+    
+    def _track_error(self, endpoint: str, status_code: int, error_message: str):
+        """Отслеживание ошибок API"""
+        from datetime import datetime
+        error_entry = {
+            'timestamp': datetime.now().isoformat(),
+            'endpoint': endpoint,
+            'status_code': status_code,
+            'error_message': error_message
+        }
+        self.api_errors.append(error_entry)
+    
+    def get_errors(self) -> List[Dict[str, Any]]:
+        """Получение списка всех ошибок"""
+        return self.api_errors
+    
+    def clear_errors(self):
+        """Очистка списка ошибок"""
+        self.api_errors = []
 
     async def get_player_info(self, player_tag: str) -> Optional[Dict[Any, Any]]:
         """Получение информации об игроке"""

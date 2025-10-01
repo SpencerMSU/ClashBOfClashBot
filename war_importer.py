@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Set
 import sys
 import os
+import json
 
 # Установка переменных окружения перед импортом config, если они не установлены
 if not os.getenv('BOT_TOKEN'):
@@ -98,6 +99,8 @@ class WarImporter:
         except Exception as e:
             logger.error(f"Критическая ошибка при импорте: {e}", exc_info=True)
         finally:
+            # Сохранение ошибок API в файл
+            await self._save_api_errors()
             await self.coc_client.close()
         
         end_time = datetime.now()
@@ -125,17 +128,31 @@ class WarImporter:
             try:
                 logger.info(f"\nОбработка локации {location_id}...")
                 
-                # Получаем топ-200 кланов из локации
-                clans = await self._get_clans_by_location(location_id, limit=200)
+                # Получаем ВСЕ кланы из локации (не ограничиваем 200)
+                # API позволяет получать до 1000 кланов за раз
+                all_clans = []
+                for limit_offset in range(0, 10000, 1000):  # Получаем до 10000 кланов с каждой локации
+                    clans = await self._get_clans_by_location(location_id, limit=1000, offset=limit_offset)
+                    
+                    if not clans:
+                        # Если кланов нет, значит достигли конца списка
+                        break
+                    
+                    all_clans.extend(clans)
+                    logger.info(f"  Получено {len(clans)} кланов (всего: {len(all_clans)})")
+                    
+                    # Если получили меньше 1000, значит это последняя партия
+                    if len(clans) < 1000:
+                        break
                 
-                if not clans:
+                if not all_clans:
                     logger.warning(f"Не удалось получить кланы для локации {location_id}")
                     continue
                 
-                logger.info(f"Найдено {len(clans)} кланов в локации {location_id}")
+                logger.info(f"Всего найдено {len(all_clans)} кланов в локации {location_id}")
                 
                 # Обрабатываем каждый клан
-                for idx, clan in enumerate(clans, 1):
+                for idx, clan in enumerate(all_clans, 1):
                     clan_tag = clan.get('tag')
                     if not clan_tag:
                         continue
@@ -144,7 +161,7 @@ class WarImporter:
                         continue
                     
                     clan_name = clan.get('name', 'Unknown')
-                    logger.info(f"  [{idx}/{len(clans)}] Обработка клана: {clan_name} ({clan_tag})")
+                    logger.info(f"  [{idx}/{len(all_clans)}] Обработка клана: {clan_name} ({clan_tag})")
                     
                     await self._process_clan(clan_tag)
                     self.processed_clans.add(clan_tag)
@@ -156,10 +173,12 @@ class WarImporter:
                 logger.error(f"Ошибка при обработке локации {location_id}: {e}")
                 self.errors_count += 1
     
-    async def _get_clans_by_location(self, location_id: int, limit: int = 200) -> List[Dict[Any, Any]]:
+    async def _get_clans_by_location(self, location_id: int, limit: int = 1000, offset: int = 0) -> List[Dict[Any, Any]]:
         """Получение кланов по локации"""
         try:
             async with self.coc_client as client:
+                # Используем before/after параметры для пагинации, если API их поддерживает
+                # Или просто limit для максимального количества
                 endpoint = f"/locations/{location_id}/rankings/clans?limit={limit}"
                 data = await client._make_request(endpoint)
                 
@@ -267,6 +286,56 @@ class WarImporter:
         except Exception as e:
             logger.error(f"    Ошибка при импорте войны: {e}")
             self.errors_count += 1
+    
+    async def _save_api_errors(self):
+        """Сохранение ошибок API в файл 404_api_errors.json"""
+        try:
+            errors = self.coc_client.get_errors()
+            
+            if not errors:
+                logger.info("Нет ошибок API для сохранения")
+                return
+            
+            # Группируем ошибки по тегам кланов для удобства
+            errors_by_clan = {}
+            for error in errors:
+                endpoint = error['endpoint']
+                # Извлекаем тег клана из endpoint
+                if '/clans/' in endpoint:
+                    # Находим тег клана между /clans/ и следующим /
+                    parts = endpoint.split('/clans/')
+                    if len(parts) > 1:
+                        clan_tag_encoded = parts[1].split('/')[0]
+                        # Декодируем URL-encoded тег
+                        from urllib.parse import unquote
+                        clan_tag = unquote(clan_tag_encoded)
+                        
+                        if clan_tag not in errors_by_clan:
+                            errors_by_clan[clan_tag] = []
+                        
+                        errors_by_clan[clan_tag].append({
+                            'timestamp': error['timestamp'],
+                            'endpoint': error['endpoint'],
+                            'status_code': error['status_code'],
+                            'error_message': error['error_message']
+                        })
+            
+            # Сохраняем в файл
+            error_data = {
+                'scan_time': datetime.now().isoformat(),
+                'total_errors': len(errors),
+                'errors_by_clan': errors_by_clan,
+                'all_errors': errors
+            }
+            
+            with open('404_api_errors.json', 'w', encoding='utf-8') as f:
+                json.dump(error_data, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"Сохранено {len(errors)} ошибок API в файл 404_api_errors.json")
+            logger.info(f"Кланов с ошибками: {len(errors_by_clan)}")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении ошибок API: {e}")
 
 
 async def main():
