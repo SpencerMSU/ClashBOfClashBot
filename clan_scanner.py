@@ -299,3 +299,75 @@ class ClanScanner:
             return "lose"
         else:
             return "tie"
+    
+    async def scan_clan_wars_history(self, clan_tag: str) -> int:
+        """Сканирование всех войн клана из warlog и добавление их в базу данных
+        
+        Args:
+            clan_tag: Тег клана для сканирования
+            
+        Returns:
+            Количество добавленных войн
+        """
+        wars_added = 0
+        
+        try:
+            logger.info(f"[Сканер кланов] Начало сканирования истории войн для клана {clan_tag}")
+            
+            async with self.coc_client as client:
+                # Получаем журнал войн клана
+                war_log = await client.get_clan_war_log(clan_tag)
+                
+                if not war_log or 'items' not in war_log:
+                    logger.warning(f"[Сканер кланов] Не удалось получить журнал войн для клана {clan_tag}")
+                    return 0
+                
+                wars = war_log.get('items', [])
+                logger.info(f"[Сканер кланов] Найдено {len(wars)} войн в журнале клана {clan_tag}")
+                
+                for war in wars:
+                    # Пропускаем войны, которые еще не завершены
+                    result = war.get('result')
+                    if not result or result == 'none':
+                        continue
+                    
+                    end_time = war.get('endTime')
+                    if not end_time:
+                        continue
+                    
+                    # Проверяем, не сохранена ли уже эта война
+                    if await self.db_service.war_exists(end_time):
+                        continue
+                    
+                    # Создаем структуру данных, похожую на currentwar
+                    # В warlog меньше информации, но достаточно для базовой статистики
+                    war_data = {
+                        'endTime': end_time,
+                        'state': 'warEnded',
+                        'clan': {
+                            'name': war.get('clan', {}).get('name', ''),
+                            'stars': war.get('clan', {}).get('stars', 0),
+                            'destructionPercentage': war.get('clan', {}).get('destructionPercentage', 0.0),
+                            'members': war.get('clan', {}).get('members', [])
+                        },
+                        'opponent': {
+                            'name': war.get('opponent', {}).get('name', 'Неизвестный противник'),
+                            'stars': war.get('opponent', {}).get('stars', 0),
+                            'destructionPercentage': war.get('opponent', {}).get('destructionPercentage', 0.0)
+                        }
+                    }
+                    
+                    # Анализируем и сохраняем войну
+                    await self._analyze_and_save_war(war_data, clan_tag)
+                    wars_added += 1
+                    
+                    # Небольшая задержка между обработкой войн
+                    await asyncio.sleep(0.1)
+                
+                logger.info(f"[Сканер кланов] Добавлено {wars_added} новых войн для клана {clan_tag}")
+                return wars_added
+                
+        except Exception as e:
+            logger.error(f"[Сканер кланов] Ошибка при сканировании истории войн клана {clan_tag}: {e}")
+            return wars_added
+

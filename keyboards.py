@@ -31,6 +31,7 @@ class Keyboards:
     COMMUNITY_CENTER_BTN = "🏛️ Центр сообщества"
     ACHIEVEMENTS_BTN = "🏆 Достижения"
     ANALYZER_BTN = "🤖 Анализатор"
+    REQUEST_WAR_SCAN_BTN = "📊 Нет данных о войнах? Запросить!"
     
     # Константы для callback-данных
     MEMBERS_CALLBACK = "members"
@@ -70,6 +71,7 @@ class Keyboards:
     ACHIEVEMENTS_SORT_CALLBACK = "achievements_sort"
     ACHIEVEMENTS_PAGE_CALLBACK = "achievements_page"
     CWL_BONUS_DISTRIBUTION_CALLBACK = "cwl_bonus_distribution"
+    WAR_SCAN_REQUEST_CALLBACK = "war_scan_request"
     
     @staticmethod
     def main_menu() -> ReplyKeyboardMarkup:
@@ -116,7 +118,8 @@ class Keyboards:
         """Меню клана"""
         keyboard = [
             [KeyboardButton(Keyboards.SEARCH_CLAN_BTN)],
-            [KeyboardButton(Keyboards.LINKED_CLANS_BTN)]
+            [KeyboardButton(Keyboards.LINKED_CLANS_BTN)],
+            [KeyboardButton(Keyboards.REQUEST_WAR_SCAN_BTN)]
         ]
         
         # Добавляем кнопку "Мой клан" если пользователь привязал аккаунт
