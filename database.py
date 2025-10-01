@@ -173,6 +173,26 @@ class DatabaseService:
                 ON linked_clans(telegram_id)
             """)
             
+            # Создание таблицы запросов на сканирование войн
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS war_scan_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_id INTEGER NOT NULL,
+                    clan_tag TEXT NOT NULL,
+                    request_date TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    wars_added INTEGER DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(telegram_id, clan_tag, request_date)
+                )
+            """)
+            
+            # Создание индекса для запросов на сканирование
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_war_scan_requests_telegram_id_date 
+                ON war_scan_requests(telegram_id, request_date)
+            """)
+            
             await db.commit()
             logger.info("База данных успешно инициализирована")
             
@@ -1006,3 +1026,55 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Ошибка при получении лимита привязанных кланов: {e}")
             return 1
+    
+    # Методы для работы с запросами на сканирование войн
+    async def can_request_war_scan(self, telegram_id: int) -> bool:
+        """Проверка, может ли пользователь запросить сканирование войн (1 успешный запрос в день)"""
+        try:
+            today = datetime.now().date().isoformat()
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM war_scan_requests "
+                    "WHERE telegram_id = ? AND request_date = ? AND status = 'success'",
+                    (telegram_id, today)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    count = row[0] if row else 0
+                    return count == 0
+        except Exception as e:
+            logger.error(f"Ошибка при проверке лимита запросов сканирования: {e}")
+            return False
+    
+    async def save_war_scan_request(self, telegram_id: int, clan_tag: str, status: str, wars_added: int = 0) -> bool:
+        """Сохранение запроса на сканирование войн"""
+        try:
+            today = datetime.now().date().isoformat()
+            created_at = datetime.now().isoformat()
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    "INSERT INTO war_scan_requests "
+                    "(telegram_id, clan_tag, request_date, status, wars_added, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (telegram_id, clan_tag, today, status, wars_added, created_at)
+                )
+                await db.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении запроса сканирования: {e}")
+            return False
+    
+    async def get_war_scan_requests_today(self, telegram_id: int) -> int:
+        """Получение количества успешных запросов на сканирование за сегодня"""
+        try:
+            today = datetime.now().date().isoformat()
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM war_scan_requests "
+                    "WHERE telegram_id = ? AND request_date = ? AND status = 'success'",
+                    (telegram_id, today)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    return row[0] if row else 0
+        except Exception as e:
+            logger.error(f"Ошибка при получении количества запросов: {e}")
+            return 0
