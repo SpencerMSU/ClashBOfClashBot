@@ -15,6 +15,7 @@ from handlers import MessageHandler as BotMessageHandler, CallbackHandler as Bot
 from message_generator import MessageGenerator
 from war_archiver import WarArchiver
 from building_monitor import BuildingMonitor
+from clan_scanner import ClanScanner
 from keyboards import Keyboards
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,9 @@ class ClashBot:
         
         # Монитор зданий
         self.building_monitor = None
+        
+        # Сканер кланов
+        self.clan_scanner = None
         
         # Приложение Telegram
         self.application = None
@@ -76,6 +80,9 @@ class ClashBot:
             
             # Запуск монитора зданий (теперь с доступным bot_instance)
             await self._start_building_monitor()
+            
+            # Запуск сканера кланов
+            await self._start_clan_scanner()
             
             logger.info("Компоненты бота успешно инициализированы")
             
@@ -206,6 +213,19 @@ class ClashBot:
         except Exception as e:
             logger.error(f"Ошибка при запуске монитора зданий: {e}")
     
+    async def _start_clan_scanner(self):
+        """Запуск сканера кланов"""
+        try:
+            self.clan_scanner = ClanScanner(
+                db_service=self.db_service,
+                coc_client=self.coc_client
+            )
+            await self.clan_scanner.start()
+            logger.info("Сканер кланов запущен")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при запуске сканера кланов: {e}")
+    
     async def run(self):
         """Запуск бота"""
         try:
@@ -258,6 +278,10 @@ class ClashBot:
             # Остановка монитора зданий
             if self.building_monitor:
                 await self.building_monitor.stop()
+            
+            # Остановка сканера кланов
+            if self.clan_scanner:
+                await self.clan_scanner.stop()
             
             # Закрытие клиента COC API
             if hasattr(self.coc_client, 'close'):

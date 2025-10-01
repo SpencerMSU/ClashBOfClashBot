@@ -81,6 +81,54 @@ class TranslationManager:
                     'Counterspell': 'Контрзаклинание',
                     'Monolith Masher': 'Сокрушитель Монолитов',
                     'Ungrateful Child': 'Неблагодарное Дитя'
+                },
+                # Achievement Descriptions (Russian)
+                'achievement_descriptions': {
+                    'Bigger Coffers': 'Улучшите хранилища золота',
+                    'Get those Goblins!': 'Победите гоблинов в одиночных миссиях',
+                    'Bigger & Better': 'Улучшайте ратушу',
+                    'Nice and Tidy': 'Уберите препятствия с базы',
+                    'Release the Beasts': 'Разблокируйте войска',
+                    'Gold Grab': 'Украдите золото в мультиплеерных боях',
+                    'Elixir Escapade': 'Украдите эликсир в мультиплеерных боях',
+                    'Sweet Victory!': 'Побеждайте в мультиплеерных боях',
+                    'Empire Builder': 'Выигрывайте трофеи в мультиплеерных боях',
+                    'Wall Buster': 'Улучшайте стены',
+                    'Humiliator': 'Побеждайте игроков с более высокой ратушей',
+                    'Union Buster': 'Уничтожайте замки кланов в боях',
+                    'Conqueror': 'Выигрывайте атаки в клановых войнах',
+                    'Unbreakable': 'Успешно защищайтесь в клановых войнах',
+                    'Friend in Need': 'Донатьте войска членам клана',
+                    'Mortar Mauler': 'Уничтожайте мортиры в боях',
+                    'Heroic Heist': 'Украдите темный эликсир в боях',
+                    'League All-Star': 'Выигрывайте звезды в войнах',
+                    'X-Bow Exterminator': 'Уничтожайте адские луки в боях',
+                    'Firefighter': 'Уничтожайте башни ада в боях',
+                    'War Hero': 'Выигрывайте звезды в клановых войнах',
+                    'Treasurer': 'Донатьте войска в клановых войнах',
+                    'Anti-Artillery': 'Уничтожайте орлиные артиллерии в боях',
+                    'Sharing is caring': 'Донатьте заклинания членам клана',
+                    'Keep your account safe!': 'Защитите свой аккаунт (Supercell ID)',
+                    'Master Engineering': 'Улучшайте зал строителя',
+                    'Next Generation Model': 'Улучшайте боевую машину',
+                    'Un-Build It': 'Уничтожайте залы строителя в боях',
+                    'Champion Builder': 'Достигайте высоких трофеев в деревне строителя',
+                    'High Gear': 'Прокачивайте боевую машину на максимум',
+                    'Hidden Treasures': 'Разрушайте здания в деревне строителя',
+                    'Games Champion': 'Выигрывайте звезды в клановых играх',
+                    'Dragon Slayer': 'Уничтожайте осадные машины в боях',
+                    'War League Legend': 'Выигрывайте звезды в лиге войн кланов',
+                    'Keep your account safe': 'Защитите свой аккаунт (Supercell ID)',
+                    'Well Seasoned': 'Участвуйте в сезонах клановых игр',
+                    'Shattered and Scattered': 'Уничтожайте разбросы в боях',
+                    'Not So Easy This Time': 'Уничтожайте гига-тесла в боях',
+                    'Bust This!': 'Уничтожайте гига-ад в боях',
+                    'Superb Work': 'Улучшайте зал строителя до максимума',
+                    'Siege Sharer': 'Донатьте осадные машины в войнах',
+                    'Aggressive Artillery': 'Уничтожайте осадные казармы в боях',
+                    'Counterspell': 'Уничтожайте фабрики заклинаний в боях',
+                    'Monolith Masher': 'Уничтожайте монолиты в боях',
+                    'Ungrateful Child': 'Уничтожайте статуи в боях'
                 }
             },
             'en': {
@@ -145,6 +193,17 @@ class TranslationManager:
             return self.translations[user_lang]['achievement_names'][original_name]
         
         return original_name
+    
+    def get_achievement_description(self, update: Update, original_name: str) -> str:
+        """Получает описание достижения (что делать для прогресса)"""
+        user_lang = self.get_user_language(update)
+        
+        if (user_lang in self.translations and 
+            'achievement_descriptions' in self.translations[user_lang] and
+            original_name in self.translations[user_lang]['achievement_descriptions']):
+            return self.translations[user_lang]['achievement_descriptions'][original_name]
+        
+        return ""
 
 
 # Глобальный экземпляр менеджера переводов
