@@ -2453,7 +2453,7 @@ class MessageGenerator:
                 clan_name = clan_data.get('name', 'Неизвестный клан')
             
             # Импортируем ClanScanner и выполняем сканирование
-            from clan_scanner import ClanScanner
+            from scanners.clan_scanner import ClanScanner
             scanner = ClanScanner(self.db_service, self.coc_client)
             
             # Сканируем историю войн
