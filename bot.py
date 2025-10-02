@@ -15,7 +15,7 @@ from handlers import MessageHandler as BotMessageHandler, CallbackHandler as Bot
 from message_generator import MessageGenerator
 from war_archiver import WarArchiver
 from building_monitor import BuildingMonitor
-from clan_scanner import ClanScanner
+from scanners.clan_scanner import ClanScanner
 from keyboards import Keyboards
 
 logger = logging.getLogger(__name__)

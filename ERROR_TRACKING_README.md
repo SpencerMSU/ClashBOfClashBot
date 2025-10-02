@@ -29,15 +29,23 @@ This update adds comprehensive error tracking and unlimited clan scanning capabi
 
 ## Usage
 
-### Running the War Importer
+### Running the War Importer (Top 10k Clans)
 ```bash
-python3 war_importer.py
+python3 scanners/war_importer.py
+```
+
+### Running the All Clans Importer (ALL Available Clans)
+```bash
+python3 all_importer.py
 ```
 
 This will:
-1. Scan ALL available clans from configured locations
+1. Scan ALL available clans from 200+ configured locations
 2. Import war data to the database
-3. Save any API errors to `404_api_errors.json`
+3. Save any API errors to `all_clans_api_errors.json`
+
+### Using the Standard War Importer
+The standard war importer in `scanners/` directory scans top 10k clans from 20 main locations.
 4. Log detailed progress to `war_importer.log`
 
 ### Running the Error Recovery Script

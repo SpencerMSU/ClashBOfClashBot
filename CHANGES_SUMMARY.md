@@ -1,5 +1,29 @@
 # Summary of Changes for War Importer Improvements
 
+## Recent Updates (Project Reorganization)
+
+### New File Structure
+The project has been reorganized for better maintainability:
+- Scanner files moved to `scanners/` directory
+- New `all_importer.py` created for comprehensive scanning of ALL clans
+- Updated imports in `bot.py` and `message_generator.py`
+
+**New Structure:**
+```
+├── all_importer.py              # Scans ALL clans from 200+ locations
+├── scanners/
+│   ├── war_importer.py          # Scans top 10k clans from 20 locations
+│   └── clan_scanner.py          # Continuous background scanner
+└── ...
+```
+
+**Documentation:**
+- `ALL_IMPORTER_README.md` - Guide for the new all_importer
+- `scanners/README.md` - Overview of all scanner types
+- Updated `WAR_IMPORTER_README.md` with new paths
+
+---
+
 ## Issue Requirements (Translated from Russian)
 The requirements were to:
 1. Scan ALL clans (not just top 200) from each location
@@ -144,8 +168,11 @@ All edge cases handled:
 ## Usage
 
 ```bash
-# Run war importer (scans ALL clans, saves errors)
-python3 war_importer.py
+# Run war importer (scans top 10k clans, saves errors)
+python3 scanners/war_importer.py
+
+# Run all clans importer (scans ALL available clans from 200+ locations)
+python3 all_importer.py
 
 # Retry failed clans
 python3 errors.py
