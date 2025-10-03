@@ -9,20 +9,22 @@ type Subscription struct {
 	StartDate        time.Time `json:"start_date"`
 	EndDate          time.Time `json:"end_date"`
 	IsActive         bool      `json:"is_active"`
-	PaymentID        *string   `json:"payment_id,omitempty"`
-	Amount           *float64  `json:"amount,omitempty"`
+	PaymentID        string    `json:"payment_id"`
+	Amount           float64   `json:"amount"`
 	Currency         string    `json:"currency"`
 }
 
 // NewSubscription creates a new Subscription instance
-func NewSubscription(telegramID int64, subscriptionType string, startDate, endDate time.Time) *Subscription {
+func NewSubscription(telegramID int64, subscriptionType string, startDate, endDate time.Time, isActive bool, paymentID string, amount float64, currency string) *Subscription {
 	return &Subscription{
 		TelegramID:       telegramID,
 		SubscriptionType: subscriptionType,
 		StartDate:        startDate,
 		EndDate:          endDate,
-		IsActive:         true,
-		Currency:         "RUB",
+		IsActive:         isActive,
+		PaymentID:        paymentID,
+		Amount:           amount,
+		Currency:         currency,
 	}
 }
 
