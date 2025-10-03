@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/SpencerMSU/ClashBOfClashBot/config"
+	"ClashBOfClashBot/config"
 )
 
 func main() {

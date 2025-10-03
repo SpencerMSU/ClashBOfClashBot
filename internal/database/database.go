@@ -9,7 +9,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"clashbot/internal/models"
+	"ClashBOfClashBot/internal/models"
 )
 
 // DatabaseService предоставляет все операции с базой данных SQLite
