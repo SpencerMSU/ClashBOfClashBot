@@ -34,14 +34,14 @@ type BuildingTracker struct {
 }
 
 // NewBuildingSnapshot creates a new BuildingSnapshot instance
-func NewBuildingSnapshot(playerTag, buildingType string, level int) *BuildingSnapshot {
+func NewBuildingSnapshot(playerTag, buildingsData string) *BuildingSnapshot {
 	return &BuildingSnapshot{
 		SnapshotID:    0, // Set by database
 		PlayerTag:     playerTag,
-		BuildingType:  buildingType,
-		Level:         level,
+		BuildingType:  "",
+		Level:         0,
 		SnapshotTime:  time.Now(),
-		BuildingsData: "",
+		BuildingsData: buildingsData,
 	}
 }
 
