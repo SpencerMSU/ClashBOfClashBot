@@ -148,7 +148,7 @@ func (b *BuildingMonitor) checkAllTrackers() error {
 	for _, tracker := range trackers {
 		// Проверяем, что у пользователя есть активная подписка
 		subscription, err := b.dbService.GetSubscription(tracker.TelegramID)
-		if err != nil || subscription == nil || !subscription.IsActive() || subscription.IsExpired() {
+		if err != nil || subscription == nil || !subscription.IsActive || subscription.IsExpired() {
 			log.Printf("[Монитор зданий] Отключение отслеживания для пользователя %d - нет активной подписки", tracker.TelegramID)
 			if err := b.deactivateTracker(tracker.TelegramID); err != nil {
 				log.Printf("[Монитор зданий] Ошибка при деактивации трекера: %v", err)
@@ -160,17 +160,14 @@ func (b *BuildingMonitor) checkAllTrackers() error {
 		checkInterval := b.getCheckIntervalForSubscription(subscription.SubscriptionType)
 
 		// Проверяем, прошло ли достаточно времени с последней проверки
-		if tracker.LastCheck != "" {
-			lastCheckTime, err := time.Parse(time.RFC3339, tracker.LastCheck)
-			if err == nil {
-				timeSinceLastCheck := currentTime.Sub(lastCheckTime)
-				if timeSinceLastCheck < checkInterval {
-					continue // Ещё не время проверять этого пользователя
-				}
+		if !tracker.LastCheck.IsZero() {
+			timeSinceLastCheck := currentTime.Sub(tracker.LastCheck)
+			if timeSinceLastCheck < checkInterval {
+				continue // Ещё не время проверять этого пользователя
 			}
 		}
 
-		if err := b.checkPlayerBuildings(&tracker); err != nil {
+		if err := b.checkPlayerBuildings(tracker); err != nil {
 			log.Printf("[Монитор зданий] Ошибка при проверке игрока %s: %v", tracker.PlayerTag, err)
 		}
 	}
@@ -214,7 +211,7 @@ func (b *BuildingMonitor) checkPlayerBuildings(tracker *models.BuildingTracker) 
 	}
 
 	// Сравниваем здания
-	upgrades, err := b.compareBuildings(lastSnapshot, playerData)
+	upgrades, err := b.compareBuildings(lastSnapshot, playerData, tracker.PlayerTag)
 	if err != nil {
 		return err
 	}
@@ -350,7 +347,6 @@ func (b *BuildingMonitor) createSnapshot(playerTag string, playerData map[string
 
 	snapshot := models.NewBuildingSnapshot(
 		playerTag,
-		time.Now().Format(time.RFC3339),
 		string(buildingsJSON),
 	)
 
@@ -358,8 +354,14 @@ func (b *BuildingMonitor) createSnapshot(playerTag string, playerData map[string
 }
 
 // compareBuildings сравнивает здания и находит улучшения
-func (b *BuildingMonitor) compareBuildings(lastSnapshot *models.BuildingSnapshot, currentData map[string]interface{}) ([]models.BuildingUpgrade, error) {
+func (b *BuildingMonitor) compareBuildings(lastSnapshot *models.BuildingSnapshot, currentData map[string]interface{}, playerTag string) ([]models.BuildingUpgrade, error) {
 	upgrades := []models.BuildingUpgrade{}
+	
+	// Get player name from current data
+	playerName := ""
+	if name, ok := currentData["name"].(string); ok {
+		playerName = name
+	}
 
 	// Загружаем данные из последнего снимка
 	var oldBuildings map[string]interface{}
@@ -503,10 +505,12 @@ func (b *BuildingMonitor) compareBuildings(lastSnapshot *models.BuildingSnapshot
 				}
 
 				upgrade := models.BuildingUpgrade{
-					BuildingName: ruName,
+					PlayerTag:    playerTag,
+					PlayerName:   playerName,
+					BuildingType: ruName,
 					OldLevel:     oldLevel,
 					NewLevel:     currentLevel,
-					UpgradeTime:  time.Now().Format(time.RFC3339),
+					UpgradeTime:  time.Now(),
 				}
 				upgrades = append(upgrades, upgrade)
 			}
@@ -518,10 +522,12 @@ func (b *BuildingMonitor) compareBuildings(lastSnapshot *models.BuildingSnapshot
 			}
 
 			upgrade := models.BuildingUpgrade{
-				BuildingName: ruName,
+				PlayerTag:    playerTag,
+				PlayerName:   playerName,
+				BuildingType: ruName,
 				OldLevel:     0,
 				NewLevel:     currentLevel,
-				UpgradeTime:  time.Now().Format(time.RFC3339),
+				UpgradeTime:  time.Now(),
 			}
 			upgrades = append(upgrades, upgrade)
 		}

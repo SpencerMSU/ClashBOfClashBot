@@ -324,7 +324,8 @@ func (w *WarArchiver) sendWarStartNotification(warData map[string]interface{}) e
 		return err
 	}
 
-	log.Printf("[Архиватор] Скоро начнется война! Отправка уведомлений %d пользователям...", len(subscribedUsers))
+	log.Printf("[Архиватор] Скоро начнется война против %s (%dvs%d)! Отправка уведомлений %d пользователям...", 
+		opponentName, clanSize, opponentSize, len(subscribedUsers))
 
 	// Здесь должна быть логика отправки уведомлений через Telegram Bot
 	// Но так как это интерфейс, реализация будет в основном боте
@@ -543,21 +544,20 @@ func (w *WarArchiver) checkDonationSnapshots() error {
 		return nil
 	}
 
-	// Сохраняем снимки для каждого участника
+	// Convert members to the format expected by database
+	memberMaps := make([]map[string]interface{}, 0, len(members))
 	for _, m := range members {
 		member, ok := m.(map[string]interface{})
 		if !ok {
 			continue
 		}
+		memberMaps = append(memberMaps, member)
+	}
 
-		memberTag, _ := member["tag"].(string)
-		donations := int(getFloatValue(member, "donations"))
-		donationsReceived := int(getFloatValue(member, "donationsReceived"))
-
-		// Сохраняем снимок
-		if err := w.dbService.SaveDonationSnapshot(memberTag, donations, donationsReceived); err != nil {
-			log.Printf("[Архиватор] Ошибка при сохранении снимка донатов для %s: %v", memberTag, err)
-		}
+	// Сохраняем снимок донатов для всех участников
+	if err := w.dbService.SaveDonationSnapshot(memberMaps, now.Format(time.RFC3339)); err != nil {
+		log.Printf("[Архиватор] Ошибка при сохранении снимка донатов: %v", err)
+		return err
 	}
 
 	w.lastDonationSnapshot = &now
