@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"ClashBOfClashBot/internal/api"
 	"ClashBOfClashBot/internal/utils"
 	"fmt"
 	"log"
@@ -56,25 +57,22 @@ func (h *MessageHandler) handleStateMessage(update *tgbotapi.Update, bot *tgbota
 	// Handle based on state
 	switch state {
 	case utils.AwaitingPlayerTagToLink:
-		// TODO: Implement player tag linking
-		msg := tgbotapi.NewMessage(chatID, "⏳ Функция привязки игрока в разработке...")
-		msg.ReplyMarkup = MainMenu()
-		bot.Send(msg)
+		// Format and link player tag
+		formattedTag := api.FormatPlayerTag(text)
 		delete(h.userStates, chatID)
+		return h.messageGen.HandleLinkAccount(update, bot, formattedTag)
 		
 	case utils.AwaitingPlayerTagToSearch:
-		// TODO: Implement player search
-		msg := tgbotapi.NewMessage(chatID, "⏳ Функция поиска игрока в разработке...")
-		msg.ReplyMarkup = MainMenu()
-		bot.Send(msg)
+		// Format and search player
+		formattedTag := api.FormatPlayerTag(text)
 		delete(h.userStates, chatID)
+		return h.messageGen.DisplayPlayerInfo(update, bot, formattedTag, nil, nil, false)
 		
 	case utils.AwaitingClanTagToSearch:
-		// TODO: Implement clan search
-		msg := tgbotapi.NewMessage(chatID, "⏳ Функция поиска клана в разработке...")
-		msg.ReplyMarkup = MainMenu()
-		bot.Send(msg)
+		// Format and search clan
+		formattedTag := api.FormatClanTag(text)
 		delete(h.userStates, chatID)
+		return h.messageGen.DisplayClanInfo(update, bot, formattedTag)
 		
 	default:
 		delete(h.userStates, chatID)
@@ -102,6 +100,12 @@ func (h *MessageHandler) handleMenuCommand(update *tgbotapi.Update, bot *tgbotap
 		
 	case AnalyzerBtn:
 		return h.handleAnalyzerMenu(update, bot)
+	
+	case MyClanBtn:
+		return h.messageGen.HandleMyClanRequest(update, bot)
+	
+	case SubscriptionBtn:
+		return h.messageGen.HandleSubscriptionMenu(update, bot)
 		
 	case BackBtn:
 		msg := tgbotapi.NewMessage(chatID, "Главное меню:")
@@ -141,23 +145,7 @@ func (h *MessageHandler) handleMenuCommand(update *tgbotapi.Update, bot *tgbotap
 
 // handleProfileMenu shows the profile menu
 func (h *MessageHandler) handleProfileMenu(update *tgbotapi.Update, bot *tgbotapi.BotAPI) error {
-	chatID := update.Message.Chat.ID
-	
-	// TODO: Check if user has linked account
-	// For now, show basic menu
-	text := "👤 *Профиль*\n\n" +
-		"Здесь вы можете:\n" +
-		"• Привязать игровой аккаунт\n" +
-		"• Просмотреть свою статистику\n" +
-		"• Найти других игроков\n" +
-		"• Управлять подпиской"
-	
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ParseMode = "Markdown"
-	msg.ReplyMarkup = ProfileMenu(nil, false, 0)
-	bot.Send(msg)
-	
-	return nil
+	return h.messageGen.HandleProfileMenuRequest(update, bot)
 }
 
 // handleClanMenu shows the clan menu
@@ -181,57 +169,17 @@ func (h *MessageHandler) handleClanMenu(update *tgbotapi.Update, bot *tgbotapi.B
 
 // handleNotificationsMenu shows the notifications menu
 func (h *MessageHandler) handleNotificationsMenu(update *tgbotapi.Update, bot *tgbotapi.BotAPI) error {
-	chatID := update.Message.Chat.ID
-	
-	text := "🔔 *Уведомления*\n\n" +
-		"Настройте уведомления о:\n" +
-		"• Начале войн\n" +
-		"• Окончании войн\n" +
-		"• Улучшениях зданий (Премиум)"
-	
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ParseMode = "Markdown"
-	msg.ReplyMarkup = NotificationToggle()
-	bot.Send(msg)
-	
-	return nil
+	return h.messageGen.HandleNotificationsMenu(update, bot)
 }
 
 // handleCommunityCenterMenu shows the community center menu
 func (h *MessageHandler) handleCommunityCenterMenu(update *tgbotapi.Update, bot *tgbotapi.BotAPI) error {
-	chatID := update.Message.Chat.ID
-	
-	text := "🏛️ *Центр сообщества*\n\n" +
-		"Полезная информация:\n" +
-		"• Стоимость улучшений зданий\n" +
-		"• Базы для разных ТХ\n" +
-		"• Гайды и советы"
-	
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ParseMode = "Markdown"
-	msg.ReplyMarkup = CommunityCenterMenu()
-	bot.Send(msg)
-	
-	return nil
+	return h.messageGen.HandleCommunityCenterMenu(update, bot)
 }
 
 // handleAnalyzerMenu shows the analyzer menu
 func (h *MessageHandler) handleAnalyzerMenu(update *tgbotapi.Update, bot *tgbotapi.BotAPI) error {
-	chatID := update.Message.Chat.ID
-	
-	text := "🤖 *Анализатор*\n\n" +
-		"⏳ Функция анализатора войн в разработке...\n\n" +
-		"Скоро здесь будет:\n" +
-		"• Анализ ваших атак\n" +
-		"• Рекомендации по улучшению\n" +
-		"• Статистика побед и поражений"
-	
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ParseMode = "Markdown"
-	msg.ReplyMarkup = MainMenu()
-	bot.Send(msg)
-	
-	return nil
+	return h.messageGen.HandleAnalyzerMenu(update, bot)
 }
 
 // isMenuCommand checks if text is a menu command

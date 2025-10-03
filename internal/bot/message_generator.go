@@ -451,6 +451,131 @@ func (m *MessageGenerator) HandleSubscriptionMenu(update *tgbotapi.Update, bot *
 	return err
 }
 
+// ========== Community Center Methods ==========
+
+// HandleCommunityCenterMenu handles community center menu
+func (m *MessageGenerator) HandleCommunityCenterMenu(update *tgbotapi.Update, bot *tgbotapi.BotAPI) error {
+	chatID := update.Message.Chat.ID
+	
+	message := "🏛 *Центр сообщества*\n\n" +
+		"Добро пожаловать в центр сообщества!\n" +
+		"Здесь вы можете найти полезную информацию и инструменты для игры.\n\n" +
+		"📊 Стоимость улучшений зданий\n" +
+		"🏗️ Рекомендуемые расстановки баз\n" +
+		"📈 Статистика и аналитика\n"
+	
+	msg := tgbotapi.NewMessage(chatID, message)
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = CommunityCenterMenu()
+	_, err := bot.Send(msg)
+	return err
+}
+
+// HandleBuildingCostsMenu handles building costs menu
+func (m *MessageGenerator) HandleBuildingCostsMenu(update *tgbotapi.Update, bot *tgbotapi.BotAPI) error {
+	chatID := update.Message.Chat.ID
+	
+	message := "🏗️ *Стоимость зданий*\n\n" +
+		"⏳ Функция просмотра стоимости зданий в разработке...\n" +
+		"Скоро вы сможете узнать стоимость и время улучшения всех зданий."
+	
+	msg := tgbotapi.NewMessage(chatID, message)
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = MainMenu()
+	_, err := bot.Send(msg)
+	return err
+}
+
+// HandleAnalyzerMenu handles analyzer menu
+func (m *MessageGenerator) HandleAnalyzerMenu(update *tgbotapi.Update, bot *tgbotapi.BotAPI) error {
+	chatID := update.Message.Chat.ID
+	
+	user, err := m.db.FindUser(chatID)
+	if err != nil || user == nil {
+		msg := tgbotapi.NewMessage(chatID, 
+			"🤖 *Анализатор*\n\n"+
+			"❌ Для использования анализатора необходимо привязать аккаунт.\n"+
+			"Перейдите в профиль и привяжите ваш игровой аккаунт.")
+		msg.ParseMode = "Markdown"
+		msg.ReplyMarkup = MainMenu()
+		_, err := bot.Send(msg)
+		return err
+	}
+	
+	message := "🤖 *Анализатор войн*\n\n" +
+		"⏳ Функция анализа войн в разработке...\n" +
+		"Скоро вы сможете получить детальный анализ текущих и прошлых войн вашего клана."
+	
+	msg := tgbotapi.NewMessage(chatID, message)
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = MainMenu()
+	_, err = bot.Send(msg)
+	return err
+}
+
+// ========== Premium Methods ==========
+
+// HandlePremiumMenu handles premium features menu
+func (m *MessageGenerator) HandlePremiumMenu(update *tgbotapi.Update, bot *tgbotapi.BotAPI) error {
+	chatID := update.Message.Chat.ID
+	
+	subscription, err := m.db.GetSubscription(chatID)
+	hasPremium := err == nil && subscription != nil && subscription.IsActive && !subscription.IsExpired()
+	
+	var message string
+	if hasPremium {
+		message = "💎 *Premium функции*\n\n" +
+			"✅ У вас активная подписка!\n\n" +
+			"Доступные функции:\n" +
+			"🏗️ Отслеживание улучшений зданий\n" +
+			"🔔 Расширенные уведомления\n" +
+			"📊 Продвинутая аналитика\n" +
+			"👥 Множественные профили\n"
+	} else {
+		message = "💎 *Premium функции*\n\n" +
+			"❌ У вас нет активной подписки\n\n" +
+			"С подпиской доступны:\n" +
+			"🏗️ Отслеживание улучшений зданий\n" +
+			"🔔 Расширенные уведомления\n" +
+			"📊 Продвинутая аналитика\n" +
+			"👥 Множественные профили\n\n" +
+			"Оформите подписку в меню подписок!"
+	}
+	
+	msg := tgbotapi.NewMessage(chatID, message)
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = PremiumMenu()
+	_, err = bot.Send(msg)
+	return err
+}
+
+// HandleBuildingTrackerMenu handles building tracker menu
+func (m *MessageGenerator) HandleBuildingTrackerMenu(update *tgbotapi.Update, bot *tgbotapi.BotAPI) error {
+	chatID := update.Message.Chat.ID
+	
+	subscription, err := m.db.GetSubscription(chatID)
+	hasPremium := err == nil && subscription != nil && subscription.IsActive && !subscription.IsExpired()
+	
+	if !hasPremium {
+		msg := tgbotapi.NewMessage(chatID, 
+			"❌ Отслеживание улучшений зданий доступно только с Premium подпиской.\n\n"+
+			"Оформите подписку чтобы получить доступ к этой функции!")
+		msg.ReplyMarkup = MainMenu()
+		_, err := bot.Send(msg)
+		return err
+	}
+	
+	message := "🏗️ *Отслеживание улучшений*\n\n" +
+		"⏳ Функция отслеживания улучшений зданий в разработке...\n" +
+		"Скоро вы сможете получать уведомления об улучшениях зданий в реальном времени."
+	
+	msg := tgbotapi.NewMessage(chatID, message)
+	msg.ParseMode = "Markdown"
+	msg.ReplyMarkup = MainMenu()
+	_, err = bot.Send(msg)
+	return err
+}
+
 // Close closes any resources held by the message generator
 func (m *MessageGenerator) Close() error {
 	// Nothing to close for now
