@@ -487,7 +487,7 @@ func (s *DatabaseService) SaveWar(war *models.WarToSave) error {
 	// Сохраняем атаки
 	for _, attack := range war.Attacks {
 		isViolation := 0
-		if attack.IsRuleViolation {
+		if attack.IsRuleViolation != 0 {
 			isViolation = 1
 		}
 
@@ -614,7 +614,7 @@ func (s *DatabaseService) GetWarList(limit, offset int) ([]map[string]interface{
 	var wars []map[string]interface{}
 	for rows.Next() {
 		var endTime, opponentName, result string
-		var teamSize, clanStars, opponentStars, clanAttacksUsed, isCWLWar, totalViolations int
+		var teamSize, clanStars, opponentStars, isCWLWar, totalViolations int
 		var clanDestruction, opponentDestruction float64
 
 		if err := rows.Scan(&endTime, &opponentName, &teamSize, &clanStars, &opponentStars,
@@ -1021,10 +1021,7 @@ func (s *DatabaseService) SaveBuildingTracker(tracker *models.BuildingTracker) e
 	}
 
 	lastCheck := ""
-	if tracker.LastCheck != nil {
-		lastCheck = tracker.LastCheck.Format(time.RFC3339)
-	}
-
+	lastCheck = tracker.LastCheck.Format(time.RFC3339)
 	_, err := s.db.Exec(`
 		INSERT OR REPLACE INTO building_trackers 
 		(telegram_id, player_tag, is_active, created_at, last_check)
@@ -1069,7 +1066,7 @@ func (s *DatabaseService) GetUserBuildingTrackers(telegramID int64) ([]*models.B
 		tracker.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		if lastCheck != "" {
 			t, _ := time.Parse(time.RFC3339, lastCheck)
-			tracker.LastCheck = &t
+			tracker.LastCheck = t
 		}
 
 		trackers = append(trackers, &tracker)
@@ -1106,7 +1103,7 @@ func (s *DatabaseService) GetBuildingTrackerForProfile(telegramID int64, playerT
 	tracker.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	if lastCheck != "" {
 		t, _ := time.Parse(time.RFC3339, lastCheck)
-		tracker.LastCheck = &t
+		tracker.LastCheck = t
 	}
 
 	return &tracker, nil
@@ -1121,7 +1118,7 @@ func (s *DatabaseService) ToggleBuildingTrackerForProfile(telegramID int64, play
 
 	if tracker == nil {
 		// Создаем новый трекер
-		newTracker := models.NewBuildingTracker(telegramID, playerTag, true)
+		newTracker := models.NewBuildingTracker(telegramID, playerTag)
 		if err := s.SaveBuildingTracker(newTracker); err != nil {
 			return false, err
 		}
@@ -1163,7 +1160,7 @@ func (s *DatabaseService) GetActiveBuildingTrackers() ([]*models.BuildingTracker
 		tracker.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		if lastCheck != "" {
 			t, _ := time.Parse(time.RFC3339, lastCheck)
-			tracker.LastCheck = &t
+			tracker.LastCheck = t
 		}
 
 		trackers = append(trackers, &tracker)

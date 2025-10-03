@@ -12,10 +12,13 @@ type Subscription struct {
 	PaymentID        string    `json:"payment_id"`
 	Amount           float64   `json:"amount"`
 	Currency         string    `json:"currency"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // NewSubscription creates a new Subscription instance
 func NewSubscription(telegramID int64, subscriptionType string, startDate, endDate time.Time, isActive bool, paymentID string, amount float64, currency string) *Subscription {
+	now := time.Now()
 	return &Subscription{
 		TelegramID:       telegramID,
 		SubscriptionType: subscriptionType,
@@ -25,6 +28,8 @@ func NewSubscription(telegramID int64, subscriptionType string, startDate, endDa
 		PaymentID:        paymentID,
 		Amount:           amount,
 		Currency:         currency,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 }
 
