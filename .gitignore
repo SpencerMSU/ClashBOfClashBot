@@ -49,3 +49,18 @@ demo_*.py
 # Logs
 *.log
 logs/
+
+# Go binaries
+clashbot
+clashbot.exe
+*.exe
+
+# Go test binaries
+*.test
+
+# Go coverage files
+*.out
+coverage.txt
+
+# Go vendor directory
+vendor/
