@@ -291,7 +291,22 @@ class UltraClanScanner:
         await self._init_high_performance_system()
         
         logger.info("💾 Инициализация базы данных...")
-        await self.db_service.init_db()
+        
+        # Проверка доступности базы данных
+        try:
+            await self.db_service.init_db()
+            logger.info("✅ База данных инициализирована успешно")
+        except Exception as e:
+            if "database is locked" in str(e).lower():
+                logger.error("❌ База данных заблокирована другим процессом!")
+                logger.error("💡 Рекомендации:")
+                logger.error("   1. Остановите основной бот: pkill -f main.py")
+                logger.error("   2. Или запустите: ./force_stop_all.sh")
+                logger.error("   3. Затем повторите запуск Ultra Scanner")
+                sys.exit(1)
+            else:
+                logger.error(f"❌ Ошибка инициализации БД: {e}")
+                sys.exit(1)
         
         logger.info(f"🌍 Будет просканировано {len(self.location_ids)} локаций")
         logger.info(f"⚡ Максимальная параллельность: {self.max_concurrent_requests} запросов")

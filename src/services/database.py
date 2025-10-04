@@ -40,7 +40,13 @@ class DatabaseService:
     
     async def init_db(self):
         """Инициализация базы данных"""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+            # Настройки для предотвращения блокировок
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA synchronous=NORMAL")
+            await db.execute("PRAGMA cache_size=10000")
+            await db.execute("PRAGMA temp_store=memory")
+            await db.execute("PRAGMA busy_timeout=30000")  # 30 секунд ожидания
             # Создание таблицы пользователей
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS users (
@@ -400,53 +406,75 @@ class DatabaseService:
         return None
     
     async def save_war(self, war: WarToSave) -> bool:
-        """Сохранение войны"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                # Сохранение основной информации о войне
-                await db.execute("""
-                    INSERT OR REPLACE INTO wars 
-                    (end_time, opponent_name, team_size, clan_stars, opponent_stars,
-                     clan_destruction, opponent_destruction, clan_attacks_used, result,
-                     is_cwl_war, total_violations)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    war.end_time, war.opponent_name, war.team_size,
-                    war.clan_stars, war.opponent_stars, war.clan_destruction,
-                    war.opponent_destruction, war.clan_attacks_used, war.result,
-                    1 if war.is_cwl_war else 0, war.total_violations
-                ))
-                
-                # Сохранение атак
-                if war.attacks_by_member:
-                    for member_tag, attacks in war.attacks_by_member.items():
-                        for attack in attacks:
-                            await db.execute("""
-                                INSERT INTO attacks 
-                                (war_id, attacker_tag, attacker_name, defender_tag,
-                                 stars, destruction, attack_order, attack_timestamp, is_rule_violation)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (
-                                war.end_time, member_tag, attack.get('attacker_name', ''),
-                                attack.get('defender_tag', ''), attack.get('stars', 0),
-                                attack.get('destruction', 0.0), attack.get('order', 0),
-                                attack.get('timestamp', 0), attack.get('is_violation', 0)
-                            ))
-                
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении войны: {e}")
-            return False
+        """Сохранение войны с retry логикой и защитой от блокировок"""
+        import asyncio
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+                    # Настройки для предотвращения блокировок
+                    await db.execute("PRAGMA busy_timeout=30000")
+                    await db.execute("PRAGMA journal_mode=WAL")
+                    
+                    # Сохранение основной информации о войне
+                    await db.execute("""
+                        INSERT OR REPLACE INTO wars 
+                        (end_time, opponent_name, team_size, clan_stars, opponent_stars,
+                         clan_destruction, opponent_destruction, clan_attacks_used, result,
+                         is_cwl_war, total_violations)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        war.end_time, war.opponent_name, war.team_size,
+                        war.clan_stars, war.opponent_stars, war.clan_destruction,
+                        war.opponent_destruction, war.clan_attacks_used, war.result,
+                        1 if war.is_cwl_war else 0, war.total_violations
+                    ))
+                    
+                    # Сохранение атак
+                    if war.attacks_by_member:
+                        for member_tag, attacks in war.attacks_by_member.items():
+                            for attack in attacks:
+                                await db.execute("""
+                                    INSERT INTO attacks 
+                                    (war_id, attacker_tag, attacker_name, defender_tag,
+                                     stars, destruction, attack_order, attack_timestamp, is_rule_violation)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """, (
+                                    war.end_time, member_tag, attack.get('attacker_name', ''),
+                                    attack.get('defender_tag', ''), attack.get('stars', 0),
+                                    attack.get('destruction', 0.0), attack.get('order', 0),
+                                    attack.get('timestamp', 0), attack.get('is_violation', 0)
+                                ))
+                    
+                    await db.commit()
+                    return True
+                    
+            except Exception as e:
+                if "database is locked" in str(e).lower() and attempt < max_retries - 1:
+                    logger.warning(f"БД заблокирована, попытка {attempt + 1}/{max_retries}. Ожидание...")
+                    await asyncio.sleep(1 + attempt)  # Увеличивающаяся задержка
+                    continue
+                else:
+                    logger.error(f"Ошибка при сохранении войны (попытка {attempt + 1}): {e}")
+                    if attempt == max_retries - 1:
+                        return False
+        
+        return False
     
     async def war_exists(self, end_time: str) -> bool:
-        """Проверка существования войны"""
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(
-                "SELECT 1 FROM wars WHERE end_time = ?", (end_time,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                return row is not None
+        """Проверка существования войны с защитой от блокировок"""
+        try:
+            async with aiosqlite.connect(self.db_path, timeout=10.0) as db:
+                await db.execute("PRAGMA busy_timeout=10000")
+                async with db.execute(
+                    "SELECT 1 FROM wars WHERE end_time = ?", (end_time,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    return row is not None
+        except Exception as e:
+            logger.warning(f"Ошибка при проверке существования войны {end_time}: {e}")
+            return False  # В случае ошибки считаем что войны нет
     
     async def get_subscribed_users(self) -> List[int]:
         """Получение списка пользователей с подпиской на уведомления"""
