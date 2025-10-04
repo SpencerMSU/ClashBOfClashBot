@@ -7,7 +7,7 @@ import json
 from typing import Dict, Optional
 from datetime import datetime, timedelta
 import uuid
-from config import config
+from config.config import config
 
 logger = logging.getLogger(__name__)
 

@@ -7,10 +7,10 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 import json
 
-from database import DatabaseService
-from coc_api import CocApiClient, is_war_ended, is_war_in_preparation, is_cwl_active
-from models.war import WarToSave
-from config import config
+from src.services.database import DatabaseService
+from src.services.coc_api import CocApiClient, is_war_ended, is_war_in_preparation, is_cwl_active
+from src.models.war import WarToSave
+from config.config import config
 
 logger = logging.getLogger(__name__)
 

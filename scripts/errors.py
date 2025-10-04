@@ -18,10 +18,10 @@ if not os.getenv('BOT_USERNAME'):
 if not os.getenv('COC_API_TOKEN'):
     os.environ['COC_API_TOKEN'] = 'WILL_BE_VALIDATED_IN_MAIN'
 
-from database import DatabaseService
-from coc_api import CocApiClient
-from models.war import WarToSave
-from config import config
+from src.services.database import DatabaseService
+from src.services.coc_api import CocApiClient
+from src.models.war import WarToSave
+from config.config import config
 
 # Настройка логирования
 logging.basicConfig(

@@ -20,7 +20,7 @@ from typing import Optional, Dict, Any, List
 from urllib.parse import quote
 import json
 
-from config import config
+from config.config import config
 
 logger = logging.getLogger(__name__)
 

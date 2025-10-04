@@ -6,8 +6,8 @@ import logging
 import os
 import sys
 
-from bot import ClashBot
-from config import config
+from src.core.bot import ClashBot
+from config.config import config
 
 # Настройка логирования
 logging.basicConfig(

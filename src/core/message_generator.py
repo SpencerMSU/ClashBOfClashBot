@@ -9,15 +9,15 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
-from database import DatabaseService
-from coc_api import CocApiClient, format_clan_tag, format_player_tag
-from keyboards import Keyboards, WarSort, MemberSort, MemberView
-from models.user import User
-from models.user_profile import UserProfile
-from user_state import UserState
-from models.subscription import Subscription
-from payment_service import YooKassaService
-from config import config
+from src.services.database import DatabaseService
+from src.services.coc_api import CocApiClient, format_clan_tag, format_player_tag
+from src.core.keyboards import Keyboards, WarSort, MemberSort, MemberView
+from src.models.user import User
+from src.models.user_profile import UserProfile
+from src.core.user_state import UserState
+from src.models.subscription import Subscription
+from src.services.payment_service import YooKassaService
+from config.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -984,7 +984,7 @@ class MessageGenerator:
                 keyboard = Keyboards.subscription_status(True)
             else:
                 # У пользователя нет активной подписки
-                from policy import get_policy_url
+                from src.utils.policy import get_policy_url
                 
                 message = (
                     f"💎 <b>Премиум подписки</b>\n\n"
@@ -1359,7 +1359,7 @@ class MessageGenerator:
                 
                 if not cwl_data:
                     # Возвращаемся к меню клана вместо показа ошибки
-                    from translations import translation_manager
+                    from src.utils.translations import translation_manager
                     message = translation_manager.get_text(update, 'cwl_not_participating', 
                                                          "❌ Клан не участвует в текущем сезоне ЛВК.")
                     
@@ -1889,7 +1889,7 @@ class MessageGenerator:
             check_interval_text = "каждые 1.5 минуты"
             
             # Проверяем статус отслеживания
-            from building_monitor import BuildingMonitor
+            from src.services.building_monitor import BuildingMonitor
             building_monitor = context.bot_data.get('building_monitor', None)
             is_active = False
             
@@ -1959,7 +1959,7 @@ class MessageGenerator:
                 )
                 return
             
-            from building_monitor import BuildingMonitor
+            from src.services.building_monitor import BuildingMonitor
             building_monitor = context.bot_data.get('building_monitor', None)
 
             if not building_monitor:
@@ -2620,7 +2620,7 @@ class MessageGenerator:
     async def handle_building_detail_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, building_id: str, page: int = 1):
         """Обработка детальной информации о здании с пагинацией"""
         try:
-            from building_data import get_building_info, format_currency, format_time
+            from src.utils.building_data import get_building_info, format_currency, format_time
             
             building_info = get_building_info(building_id)
             
@@ -2807,7 +2807,7 @@ class MessageGenerator:
                 player_data = await client.get_player_info(player_tag)
                 
                 if not player_data:
-                    from translations import translation_manager
+                    from src.utils.translations import translation_manager
                     error_msg = translation_manager.get_text(update, 'player_not_found', "❌ Игрок не найден.")
                     await update.callback_query.edit_message_text(error_msg)
                     return
@@ -2833,7 +2833,7 @@ class MessageGenerator:
                 
         except Exception as e:
             logger.error(f"Ошибка при обработке достижений игрока {player_tag}: {e}")
-            from translations import translation_manager
+            from src.utils.translations import translation_manager
             error_msg = translation_manager.get_text(update, 'loading_error', "❌ Произошла ошибка при загрузке данных.")
             try:
                 await update.callback_query.edit_message_text(error_msg)
@@ -2922,7 +2922,7 @@ class MessageGenerator:
                     
                 name = achievement.get('name', 'Неизвестно')
                 # Переводим название достижения
-                from translations import translation_manager
+                from src.utils.translations import translation_manager
                 translated_name = translation_manager.get_achievement_name(update, name)
                 # Получаем описание достижения
                 description = translation_manager.get_achievement_description(update, name)

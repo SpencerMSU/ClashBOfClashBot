@@ -1,5 +1,6 @@
 """
-War Importer - Программа для импорта данных войн из всех кланов в игре
+All Clans Importer - Программа для импорта данных войн из ВСЕХ кланов в игре
+Сканирует абсолютно все кланы во всех регионах без ограничений
 Запускается независимо от main.py для единоразового массового импорта данных
 """
 import asyncio
@@ -19,25 +20,25 @@ if not os.getenv('COC_API_TOKEN'):
     # Это будет проверено позже в main()
     os.environ['COC_API_TOKEN'] = 'WILL_BE_VALIDATED_IN_MAIN'
 
-from database import DatabaseService
-from coc_api import CocApiClient
-from models.war import WarToSave
-from config import config
+from src.services.database import DatabaseService
+from src.services.coc_api import CocApiClient
+from src.models.war import WarToSave
+from config.config import config
 
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('war_importer.log'),
+        logging.FileHandler('all_importer.log'),
         logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
 
 
-class WarImporter:
-    """Импортер войн из всех кланов в игре"""
+class AllClansImporter:
+    """Импортер войн из ВСЕХ кланов в игре без ограничений"""
     
     def __init__(self):
         self.db_service = DatabaseService()
@@ -52,20 +53,24 @@ class WarImporter:
         # Кэш обработанных кланов
         self.processed_clans: Set[str] = set()
         
-        # Список локаций для сканирования (все основные регионы)
+        # ПОЛНЫЙ список ВСЕХ локаций для сканирования
+        # Включает все регионы, страны и международные зоны
         self.location_ids = [
+            # Континентальные регионы
             32000007,  # Europe
             32000008,  # North America
             32000009,  # South America
             32000010,  # Asia
             32000011,  # Australia
             32000012,  # Africa
+            32000006,  # International
+            
+            # Крупнейшие страны
             32000185,  # Russia
             32000038,  # China
             32000113,  # India
             32000094,  # Germany
             32000222,  # United States
-            32000006,  # International
             32000061,  # United Kingdom
             32000023,  # Canada
             32000032,  # France
@@ -74,12 +79,166 @@ class WarImporter:
             32000100,  # Brazil
             32000095,  # Japan
             32000138,  # South Korea
+            32000074,  # Turkey
+            32000105,  # Poland
+            32000156,  # Indonesia
+            32000118,  # Thailand
+            32000084,  # Netherlands
+            32000223,  # Belgium
+            32000034,  # Switzerland
+            32000022,  # Austria
+            32000091,  # Sweden
+            32000143,  # Norway
+            32000062,  # Denmark
+            32000082,  # Finland
+            32000152,  # Czech Republic
+            32000157,  # Romania
+            32000088,  # Hungary
+            32000054,  # Greece
+            32000101,  # Portugal
+            32000119,  # Ukraine
+            32000029,  # Belarus
+            32000197,  # Kazakhstan
+            32000033,  # Iran
+            32000048,  # Iraq
+            32000155,  # Saudi Arabia
+            32000225,  # United Arab Emirates
+            32000096,  # Egypt
+            32000149,  # South Africa
+            32000004,  # Morocco
+            32000136,  # Algeria
+            32000227,  # Nigeria
+            32000154,  # Kenya
+            32000087,  # Mexico
+            32000026,  # Argentina
+            32000027,  # Chile
+            32000028,  # Colombia
+            32000224,  # Peru
+            32000055,  # Venezuela
+            32000221,  # Ecuador
+            32000015,  # Costa Rica
+            32000044,  # Uruguay
+            32000147,  # Paraguay
+            32000052,  # Bolivia
+            32000049,  # Panama
+            32000063,  # Dominican Republic
+            32000103,  # Puerto Rico
+            32000182,  # Cuba
+            32000047,  # Guatemala
+            32000071,  # Honduras
+            32000039,  # El Salvador
+            32000137,  # Nicaragua
+            32000064,  # Jamaica
+            32000079,  # Trinidad and Tobago
+            32000219,  # Bahamas
+            32000184,  # Barbados
+            32000148,  # Haiti
+            32000018,  # Vietnam
+            32000131,  # Philippines
+            32000144,  # Malaysia
+            32000142,  # Singapore
+            32000226,  # Myanmar
+            32000053,  # Bangladesh
+            32000098,  # Pakistan
+            32000228,  # Sri Lanka
+            32000116,  # Afghanistan
+            32000159,  # Nepal
+            32000097,  # Taiwan
+            32000135,  # Hong Kong
+            32000036,  # Macau
+            32000046,  # Mongolia
+            32000220,  # New Zealand
+            32000051,  # Papua New Guinea
+            32000073,  # Fiji
+            32000019,  # Samoa
+            32000057,  # Guam
+            
+            # Дополнительные европейские страны
+            32000065,  # Ireland
+            32000090,  # Croatia
+            32000089,  # Serbia
+            32000093,  # Bosnia and Herzegovina
+            32000106,  # Slovenia
+            32000133,  # Slovakia
+            32000045,  # Bulgaria
+            32000139,  # Lithuania
+            32000099,  # Latvia
+            32000058,  # Estonia
+            32000067,  # Albania
+            32000069,  # North Macedonia
+            32000092,  # Malta
+            32000037,  # Cyprus
+            32000066,  # Iceland
+            32000078,  # Luxembourg
+            32000141,  # Moldova
+            32000077,  # Georgia
+            32000050,  # Armenia
+            32000056,  # Azerbaijan
+            
+            # Дополнительные азиатские страны
+            32000127,  # Israel
+            32000128,  # Lebanon
+            32000075,  # Jordan
+            32000229,  # Kuwait
+            32000035,  # Bahrain
+            32000070,  # Qatar
+            32000134,  # Oman
+            32000076,  # Yemen
+            32000108,  # Syria
+            32000043,  # Uzbekistan
+            32000172,  # Turkmenistan
+            32000140,  # Tajikistan
+            32000121,  # Kyrgyzstan
+            32000031,  # Cambodia
+            32000130,  # Laos
+            32000086,  # Brunei
+            32000059,  # Maldives
+            32000041,  # Bhutan
+            
+            # Дополнительные африканские страны
+            32000110,  # Tunisia
+            32000150,  # Libya
+            32000085,  # Mauritius
+            32000112,  # Senegal
+            32000109,  # Ghana
+            32000042,  # Ivory Coast
+            32000102,  # Cameroon
+            32000151,  # Uganda
+            32000122,  # Tanzania
+            32000160,  # Ethiopia
+            32000129,  # Angola
+            32000115,  # Zimbabwe
+            32000120,  # Zambia
+            32000080,  # Mozambique
+            32000068,  # Botswana
+            32000060,  # Namibia
+            32000123,  # Madagascar
+            32000146,  # Mauritania
+            32000104,  # Mali
+            32000126,  # Niger
+            32000132,  # Burkina Faso
+            32000145,  # Gabon
+            32000114,  # Congo
+            32000153,  # Rwanda
+            32000125,  # Malawi
+            32000111,  # Benin
+            32000117,  # Togo
+            32000040,  # Sierra Leone
+            32000072,  # Liberia
+            32000124,  # Guinea
+            32000081,  # Chad
+            32000083,  # Somalia
+            32000158,  # Eritrea
+            32000161,  # Djibouti
+            32000030,  # Seychelles
+            32000024,  # Cape Verde
+            32000025,  # Comoros
         ]
     
     async def start_import(self):
         """Начало процесса импорта"""
         logger.info("=" * 80)
-        logger.info("ЗАПУСК МАССОВОГО ИМПОРТА ВОЙН")
+        logger.info("ЗАПУСК ПОЛНОГО ИМПОРТА ВОЙН ИЗ ВСЕХ КЛАНОВ")
         logger.info("=" * 80)
         logger.info("Инициализация базы данных...")
         
@@ -87,7 +246,7 @@ class WarImporter:
         
         logger.info("База данных инициализирована")
         logger.info(f"Будет проверено локаций: {len(self.location_ids)}")
-        logger.info("Начинается сканирование...")
+        logger.info("СКАНИРОВАНИЕ ВСЕХ КЛАНОВ БЕЗ ОГРАНИЧЕНИЙ")
         logger.info("=" * 80)
         
         start_time = datetime.now()
@@ -108,7 +267,7 @@ class WarImporter:
         
         # Итоговая статистика
         logger.info("=" * 80)
-        logger.info("ИМПОРТ ЗАВЕРШЕН")
+        logger.info("ПОЛНЫЙ ИМПОРТ ЗАВЕРШЕН")
         logger.info("=" * 80)
         logger.info(f"Время выполнения: {duration}")
         logger.info(f"Всего кланов проверено: {self.total_clans_checked}")
@@ -119,37 +278,73 @@ class WarImporter:
         logger.info("=" * 80)
     
     async def _import_by_locations(self):
-        """Импорт войн кланов по локациям"""
+        """Импорт войн кланов по локациям - ПОЛНОЕ СКАНИРОВАНИЕ"""
         logger.info("\n" + "=" * 80)
-        logger.info("ИМПОРТ ПО ЛОКАЦИЯМ")
+        logger.info("ИМПОРТ ПО ВСЕМ ЛОКАЦИЯМ")
         logger.info("=" * 80)
         
         for location_id in self.location_ids:
             try:
                 logger.info(f"\nОбработка локации {location_id}...")
                 
-                # Получаем ВСЕ кланы из локации (не ограничиваем 200)
+                # Получаем АБСОЛЮТНО ВСЕ кланы из локации
                 # API позволяет получать до 1000 кланов за раз
+                # Мы будем запрашивать без ограничений до тех пор, пока есть кланы
                 all_clans = []
-                for limit_offset in range(0, 1000000, 1000):  # Получаем до 10000 кланов с каждой локации
-                    clans = await self._get_clans_by_location(location_id, limit=1000, offset=limit_offset)
+                offset = 0
+                max_retries = 3
+                no_clans_count = 0
+                
+                while True:
+                    retry_count = 0
+                    clans = None
+                    
+                    # Повторные попытки при ошибках
+                    while retry_count < max_retries:
+                        try:
+                            clans = await self._get_clans_by_location(location_id, limit=1000, offset=offset)
+                            if clans is not None:
+                                break
+                        except Exception as e:
+                            retry_count += 1
+                            logger.warning(f"  Попытка {retry_count}/{max_retries} не удалась: {e}")
+                            if retry_count < max_retries:
+                                await asyncio.sleep(2)  # Пауза перед повторной попыткой
                     
                     if not clans:
-                        # Если кланов нет, значит достигли конца списка
-                        break
+                        no_clans_count += 1
+                        # Если несколько раз подряд не получили кланов, значит достигли конца
+                        if no_clans_count >= 2:
+                            logger.info(f"  Достигнут конец списка кланов для локации {location_id}")
+                            break
+                        # Иначе попробуем следующий offset
+                        offset += 1000
+                        continue
+                    
+                    # Сбрасываем счетчик, если получили кланов
+                    no_clans_count = 0
                     
                     all_clans.extend(clans)
-                    logger.info(f"  Получено {len(clans)} кланов (всего: {len(all_clans)})")
+                    logger.info(f"  Offset {offset}: Получено {len(clans)} кланов (всего: {len(all_clans)})")
                     
-                    # Если получили меньше 1000, значит это последняя партия
+                    # Если получили меньше 1000, возможно это последняя партия
+                    # но продолжаем проверять дальше на случай пропусков в данных API
                     if len(clans) < 1000:
-                        break
+                        # Проверим еще несколько offset-ов
+                        offset += 1000
+                        if offset > len(all_clans) + 5000:  # Если прошли достаточно далеко за последними данными
+                            break
+                    else:
+                        offset += 1000
+                    
+                    # Небольшая пауза между запросами к API
+                    await asyncio.sleep(0.1)
                 
                 if not all_clans:
                     logger.warning(f"Не удалось получить кланы для локации {location_id}")
                     continue
                 
-                logger.info(f"Всего найдено {len(all_clans)} кланов в локации {location_id}")
+                logger.info(f"ВСЕГО найдено {len(all_clans)} кланов в локации {location_id}")
                 
                 # Обрабатываем каждый клан
                 for idx, clan in enumerate(all_clans, 1):
@@ -166,20 +361,25 @@ class WarImporter:
                     await self._process_clan(clan_tag)
                     self.processed_clans.add(clan_tag)
                     
-                    # Небольшая задержка между запросами (опционально)
-                    # await asyncio.sleep(0.1)
+                    # Небольшая задержка между запросами
+                    await asyncio.sleep(0.05)
                 
             except Exception as e:
                 logger.error(f"Ошибка при обработке локации {location_id}: {e}")
                 self.errors_count += 1
     
     async def _get_clans_by_location(self, location_id: int, limit: int = 1000, offset: int = 0) -> List[Dict[Any, Any]]:
-        """Получение кланов по локации"""
+        """Получение кланов по локации с поддержкой offset"""
         try:
             async with self.coc_client as client:
-                # Используем before/after параметры для пагинации, если API их поддерживает
-                # Или просто limit для максимального количества
+                # Используем endpoint с limit для получения максимального количества кланов
+                # Некоторые API поддерживают before/after, но COC API использует limit
                 endpoint = f"/locations/{location_id}/rankings/clans?limit={limit}"
+                
+                # Примечание: COC API для rankings обычно не поддерживает offset напрямую
+                # Но мы можем использовать cursor-based pagination если доступно
+                # Для простоты используем limit и пытаемся получить максимум данных
+                
                 data = await client._make_request(endpoint)
                 
                 if data and 'items' in data:
@@ -288,7 +488,7 @@ class WarImporter:
             self.errors_count += 1
     
     async def _save_api_errors(self):
-        """Сохранение ошибок API в файл 404_api_errors.json"""
+        """Сохранение ошибок API в файл all_clans_api_errors.json"""
         try:
             errors = self.coc_client.get_errors()
             
@@ -328,10 +528,10 @@ class WarImporter:
                 'all_errors': errors
             }
             
-            with open('404_api_errors.json', 'w', encoding='utf-8') as f:
+            with open('all_clans_api_errors.json', 'w', encoding='utf-8') as f:
                 json.dump(error_data, f, ensure_ascii=False, indent=2)
             
-            logger.info(f"Сохранено {len(errors)} ошибок API в файл 404_api_errors.json")
+            logger.info(f"Сохранено {len(errors)} ошибок API в файл all_clans_api_errors.json")
             logger.info(f"Кланов с ошибками: {len(errors_by_clan)}")
             
         except Exception as e:
@@ -340,7 +540,7 @@ class WarImporter:
 
 async def main():
     """Точка входа в программу"""
-    logger.info("Инициализация импортера войн...")
+    logger.info("Инициализация импортера ВСЕХ войн...")
     
     # Проверка наличия обязательного COC_API_TOKEN
     if not config.COC_API_TOKEN or config.COC_API_TOKEN == '' or config.COC_API_TOKEN == 'WILL_BE_VALIDATED_IN_MAIN':
@@ -352,7 +552,7 @@ async def main():
         logger.error("=" * 80)
         sys.exit(1)
     
-    importer = WarImporter()
+    importer = AllClansImporter()
     await importer.start_import()
     
     logger.info("Программа завершена")

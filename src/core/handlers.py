@@ -7,10 +7,10 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
-from keyboards import Keyboards, WarSort, MemberSort, MemberView
-from user_state import UserState
-from message_generator import MessageGenerator
-from coc_api import format_clan_tag, format_player_tag
+from src.core.keyboards import Keyboards, WarSort, MemberSort, MemberView
+from src.core.user_state import UserState
+from src.core.message_generator import MessageGenerator
+from src.services.coc_api import format_clan_tag, format_player_tag
 
 logger = logging.getLogger(__name__)
 
@@ -950,7 +950,7 @@ class CallbackHandler:
         """Обработка обновления анализатора ИИ"""
         try:
             # Показываем сообщение о том, что функция в разработке
-            from translations import translation_manager
+            from src.utils.translations import translation_manager
             message = translation_manager.get_text(update, 'analyzer_coming_soon',
                 '🤖 <b>Анализатор войн</b>\n\n🚧 <b>В разработке</b>\n\nАнализатор находится в стадии разработки.\nКогда-то он будет, но не сейчас.\n\nСледите за обновлениями!')
             
@@ -967,7 +967,7 @@ class CallbackHandler:
             )
         except Exception as e:
             logger.error(f"Ошибка при обновлении анализатора: {e}")
-            from translations import translation_manager
+            from src.utils.translations import translation_manager
             error_message = translation_manager.get_text(update, 'analyzer_refresh_error',
                 '🤖 <b>Анализатор войн</b>\n\n🚧 Функция временно недоступна.\nПопробуйте позже.')
             await update.callback_query.edit_message_text(error_message, parse_mode='HTML')

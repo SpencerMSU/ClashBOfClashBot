@@ -8,15 +8,15 @@ from telegram import Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.constants import ParseMode
 
-from config import config
-from database import DatabaseService
-from coc_api import CocApiClient
-from handlers import MessageHandler as BotMessageHandler, CallbackHandler as BotCallbackHandler
-from message_generator import MessageGenerator
-from war_archiver import WarArchiver
-from building_monitor import BuildingMonitor
-from scanners.clan_scanner import ClanScanner
-from keyboards import Keyboards
+from config.config import config
+from src.services.database import DatabaseService
+from src.services.coc_api import CocApiClient
+from src.core.handlers import MessageHandler as BotMessageHandler, CallbackHandler as BotCallbackHandler
+from src.core.message_generator import MessageGenerator
+from src.services.war_archiver import WarArchiver
+from src.services.building_monitor import BuildingMonitor
+from src.scanners.clan_scanner import ClanScanner
+from src.core.keyboards import Keyboards
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ class ClashBot:
                 await self._handle_payment_success(update, context, command_arg)
                 return
         
-        from policy import get_policy_url
+        from src.utils.policy import get_policy_url
         
         await update.message.reply_text(
             "🎮 *Добро пожаловать в ClashBot!*\n\n"
