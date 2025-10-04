@@ -54,7 +54,13 @@ class UltraClanScanner:
     """УЛЬТРА СКАНЕР - Сканирует МИЛЛИОНЫ кланов с максимальной скоростью"""
     
     def __init__(self):
-        self.db_service = DatabaseService()
+        # Определяем абсолютный путь к базе данных в корневой папке проекта
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(current_dir)
+        db_path = os.path.join(parent_dir, 'clashbot.db')
+        
+        logger.info(f"🗄️ Путь к базе данных: {db_path}")
+        self.db_service = DatabaseService(db_path=db_path)
         
         # Статистика
         self.total_clans_found = 0
@@ -701,6 +707,38 @@ class UltraClanScanner:
 async def main():
     """Точка входа в УЛЬТРА сканер"""
     logger.info("🚀 Инициализация УЛЬТРА СКАНЕРА...")
+    
+    # Проверка рабочей папки
+    current_dir = os.getcwd()
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(script_dir)
+    
+    logger.info(f"📁 Текущая папка: {current_dir}")
+    logger.info(f"📁 Скрипт находится в: {script_dir}")
+    logger.info(f"📁 Корневая папка проекта: {parent_dir}")
+    
+    # Проверка базы данных
+    db_path = os.path.join(parent_dir, 'clashbot.db')
+    logger.info(f"🗄️ Ожидаемый путь к БД: {db_path}")
+    
+    if os.path.exists(db_path):
+        logger.info("✅ База данных найдена")
+        if os.access(db_path, os.R_OK):
+            logger.info("✅ База данных доступна для чтения")
+        else:
+            logger.error("❌ Нет прав на чтение базы данных")
+            sys.exit(1)
+        if os.access(db_path, os.W_OK):
+            logger.info("✅ База данных доступна для записи")
+        else:
+            logger.error("❌ Нет прав на запись в базу данных")
+            sys.exit(1)
+    else:
+        logger.warning("⚠️ База данных не найдена, будет создана автоматически")
+        # Проверяем права на создание файлов в корневой папке
+        if not os.access(parent_dir, os.W_OK):
+            logger.error(f"❌ Нет прав на создание БД в папке: {parent_dir}")
+            sys.exit(1)
     
     # Проверка наличия обязательных токенов
     if not config.COC_API_TOKEN or config.COC_API_TOKEN == '':

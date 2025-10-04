@@ -3,6 +3,7 @@
 """
 import aiosqlite
 import logging
+import os
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import json
@@ -23,6 +24,19 @@ class DatabaseService:
     
     def __init__(self, db_path: str = None):
         self.db_path = db_path or config.DATABASE_PATH
+        
+        # Логирование пути к базе данных для диагностики
+        abs_path = os.path.abspath(self.db_path)
+        logger.info(f"📂 DatabaseService инициализирован с путем: {abs_path}")
+        
+        # Проверка возможности доступа к папке БД
+        db_dir = os.path.dirname(abs_path)
+        if not os.path.exists(db_dir):
+            logger.error(f"❌ Папка для БД не существует: {db_dir}")
+        elif not os.access(db_dir, os.W_OK):
+            logger.error(f"❌ Нет прав на запись в папку БД: {db_dir}")
+        else:
+            logger.info(f"✅ Папка БД доступна для записи: {db_dir}")
     
     async def init_db(self):
         """Инициализация базы данных"""
