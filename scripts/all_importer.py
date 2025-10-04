@@ -34,7 +34,7 @@ if not os.getenv('BOT_TOKEN'):
 if not os.getenv('BOT_USERNAME'):
     os.environ['BOT_USERNAME'] = 'DUMMY_USERNAME'
 
-from src.services.database import DatabaseService
+from src.services.nosql_database import NoSQLDatabaseService as DatabaseService
 from src.models.war import WarToSave
 from config.config import config
 
