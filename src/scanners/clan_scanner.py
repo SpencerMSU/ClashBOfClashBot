@@ -95,6 +95,12 @@ class ClanScanner:
         """Сканирование кланов"""
         logger.info("[Сканер кланов] Начало сканирования")
         
+        # Проверяем доступность API перед началом
+        api_available = await self._check_api_availability()
+        if not api_available:
+            logger.warning("[Сканер кланов] API недоступен, пропускаем сканирование")
+            return
+        
         scanned_count = 0
         wars_found = 0
         
@@ -131,13 +137,24 @@ class ClanScanner:
                         await asyncio.sleep(1)
                     
                 except Exception as e:
-                    logger.error(f"[Сканер кланов] Ошибка при сканировании локации {location_id}: {e}")
+                    logger.debug(f"[Сканер кланов] Ошибка при сканировании локации {location_id}: {e}")
                     continue
             
             logger.info(f"[Сканер кланов] Завершено. Отсканировано {scanned_count} кланов, найдено {wars_found} новых войн")
             
         except Exception as e:
             logger.error(f"[Сканер кланов] Ошибка при сканировании: {e}")
+    
+    async def _check_api_availability(self) -> bool:
+        """Проверка доступности COC API"""
+        try:
+            async with self.coc_client as client:
+                # Пробуем сделать простой запрос для проверки API
+                endpoint = "/locations/32000007/rankings/clans?limit=1"
+                data = await client._make_request(endpoint)
+                return data is not None
+        except Exception:
+            return False
     
     def _should_scan_clan(self, clan_tag: str) -> bool:
         """Проверка, нужно ли сканировать клан"""
@@ -161,7 +178,8 @@ class ClanScanner:
                     return data['items']
                 
         except Exception as e:
-            logger.error(f"[Сканер кланов] Ошибка при получении топ кланов локации {location_id}: {e}")
+            # Логируем только на уровне DEBUG, чтобы не засорять логи при проблемах с API
+            logger.debug(f"[Сканер кланов] Ошибка при получении топ кланов локации {location_id}: {e}")
         
         return []
     
@@ -194,7 +212,8 @@ class ClanScanner:
                 return True
                 
         except Exception as e:
-            logger.error(f"[Сканер кланов] Ошибка при сканировании войны клана {clan_tag}: {e}")
+            # Логируем только на уровне DEBUG для API ошибок
+            logger.debug(f"[Сканер кланов] Ошибка при сканировании войны клана {clan_tag}: {e}")
             return False
     
     async def _analyze_and_save_war(self, war_data: Dict[Any, Any], clan_tag: str):
