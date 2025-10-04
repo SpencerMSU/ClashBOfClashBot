@@ -39,34 +39,165 @@ class DatabaseService:
             logger.info(f"✅ Папка БД доступна для записи: {db_dir}")
     
     async def init_db(self):
-        """Инициализация базы данных"""
-        async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
-            # Настройки для предотвращения блокировок
-            await db.execute("PRAGMA journal_mode=WAL")
-            await db.execute("PRAGMA synchronous=NORMAL")
-            await db.execute("PRAGMA cache_size=10000")
-            await db.execute("PRAGMA temp_store=memory")
-            await db.execute("PRAGMA busy_timeout=30000")  # 30 секунд ожидания
-            # Создание таблицы пользователей
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    telegram_id INTEGER PRIMARY KEY,
-                    player_tag TEXT NOT NULL UNIQUE
-                )
-            """)
-            
-            # Создание таблицы профилей для премиум пользователей
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS user_profiles (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    telegram_id INTEGER NOT NULL,
-                    player_tag TEXT NOT NULL,
-                    profile_name TEXT,
-                    is_primary INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL,
-                    UNIQUE(telegram_id, player_tag)
-                )
-            """)
+        """Полная инициализация базы данных со всеми таблицами"""
+        logger.info("🗄️ Инициализация базы данных...")
+        
+        try:
+            async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
+                # Настройки для предотвращения блокировок
+                await db.execute("PRAGMA journal_mode=WAL")
+                await db.execute("PRAGMA synchronous=NORMAL")
+                await db.execute("PRAGMA cache_size=10000")
+                await db.execute("PRAGMA temp_store=memory")
+                await db.execute("PRAGMA busy_timeout=30000")  # 30 секунд ожидания
+                
+                logger.info("📋 Создание таблицы пользователей...")
+                # Создание таблицы пользователей
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        telegram_id INTEGER PRIMARY KEY,
+                        player_tag TEXT NOT NULL UNIQUE
+                    )
+                """)
+                
+                logger.info("👤 Создание таблицы профилей пользователей...")
+                # Создание таблицы профилей для премиум пользователей
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS user_profiles (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        telegram_id INTEGER NOT NULL,
+                        player_tag TEXT NOT NULL,
+                        profile_name TEXT,
+                        is_primary INTEGER NOT NULL DEFAULT 0,
+                        created_at TEXT NOT NULL,
+                        UNIQUE(telegram_id, player_tag)
+                    )
+                """)
+                
+                logger.info("⚔️ Создание таблицы войн...")
+                # Создание таблицы войн
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS wars (
+                        end_time TEXT PRIMARY KEY,
+                        opponent_name TEXT NOT NULL,
+                        team_size INTEGER NOT NULL,
+                        clan_stars INTEGER NOT NULL DEFAULT 0,
+                        opponent_stars INTEGER NOT NULL DEFAULT 0,
+                        clan_destruction REAL NOT NULL DEFAULT 0.0,
+                        opponent_destruction REAL NOT NULL DEFAULT 0.0,
+                        clan_attacks_used INTEGER NOT NULL DEFAULT 0,
+                        result TEXT NOT NULL,
+                        is_cwl_war INTEGER NOT NULL DEFAULT 0,
+                        total_violations INTEGER NOT NULL DEFAULT 0,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                logger.info("🗡️ Создание таблицы атак...")
+                # Создание таблицы атак
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS attacks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        war_id TEXT NOT NULL,
+                        attacker_tag TEXT NOT NULL,
+                        attacker_name TEXT NOT NULL,
+                        defender_tag TEXT NOT NULL,
+                        stars INTEGER NOT NULL DEFAULT 0,
+                        destruction REAL NOT NULL DEFAULT 0.0,
+                        attack_order INTEGER NOT NULL DEFAULT 0,
+                        attack_timestamp INTEGER NOT NULL DEFAULT 0,
+                        is_rule_violation INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY (war_id) REFERENCES wars (end_time)
+                    )
+                """)
+                
+                logger.info("🏰 Создание таблицы привязанных кланов...")
+                # Создание таблицы привязанных кланов
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS linked_clans (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        telegram_id INTEGER NOT NULL,
+                        clan_tag TEXT NOT NULL,
+                        clan_name TEXT NOT NULL,
+                        linked_at TEXT NOT NULL,
+                        is_active INTEGER NOT NULL DEFAULT 1,
+                        UNIQUE(telegram_id, clan_tag)
+                    )
+                """)
+                
+                logger.info("💳 Создание таблицы подписок...")
+                # Создание таблицы подписок
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS subscriptions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        telegram_id INTEGER NOT NULL UNIQUE,
+                        subscription_type TEXT NOT NULL,
+                        start_date TEXT NOT NULL,
+                        end_date TEXT NOT NULL,
+                        is_active INTEGER NOT NULL DEFAULT 1,
+                        payment_id TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                logger.info("🏢 Создание таблицы зданий...")
+                # Создание таблицы зданий
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS buildings (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        player_tag TEXT NOT NULL,
+                        building_name TEXT NOT NULL,
+                        level INTEGER NOT NULL,
+                        is_maxed INTEGER NOT NULL DEFAULT 0,
+                        upgrade_cost INTEGER,
+                        upgrade_time INTEGER,
+                        last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(player_tag, building_name)
+                    )
+                """)
+                
+                logger.info("📊 Создание таблицы снапшотов донатов...")
+                # Создание таблицы снапшотов донатов
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS donation_snapshots (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        player_tag TEXT NOT NULL,
+                        donations_given INTEGER NOT NULL DEFAULT 0,
+                        donations_received INTEGER NOT NULL DEFAULT 0,
+                        snapshot_date TEXT NOT NULL,
+                        UNIQUE(player_tag, snapshot_date)
+                    )
+                """)
+                
+                logger.info("🔍 Создание таблицы запросов сканирования...")
+                # Создание таблицы запросов сканирования войн
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS war_scan_requests (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        telegram_id INTEGER NOT NULL,
+                        clan_tag TEXT NOT NULL,
+                        request_type TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        wars_added INTEGER NOT NULL DEFAULT 0,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        completed_at TEXT
+                    )
+                """)
+                
+                # Создание индексов для оптимизации
+                logger.info("⚡ Создание индексов...")
+                await db.execute("CREATE INDEX IF NOT EXISTS idx_wars_end_time ON wars(end_time)")
+                await db.execute("CREATE INDEX IF NOT EXISTS idx_attacks_war_id ON attacks(war_id)")
+                await db.execute("CREATE INDEX IF NOT EXISTS idx_attacks_attacker ON attacks(attacker_tag)")
+                await db.execute("CREATE INDEX IF NOT EXISTS idx_linked_clans_telegram ON linked_clans(telegram_id)")
+                await db.execute("CREATE INDEX IF NOT EXISTS idx_buildings_player ON buildings(player_tag)")
+                
+                await db.commit()
+                logger.info("✅ База данных успешно инициализирована со всеми таблицами!")
+                
+        except Exception as e:
+            logger.error(f"❌ Ошибка при инициализации базы данных: {e}")
+            raise
             
             # Создание индекса для профилей
             await db.execute("""
@@ -451,12 +582,18 @@ class DatabaseService:
                     return True
                     
             except Exception as e:
-                if "database is locked" in str(e).lower() and attempt < max_retries - 1:
-                    logger.warning(f"БД заблокирована, попытка {attempt + 1}/{max_retries}. Ожидание...")
-                    await asyncio.sleep(1 + attempt)  # Увеличивающаяся задержка
+                error_msg = str(e).lower()
+                if ("database is locked" in error_msg or 
+                    "can't start new thread" in error_msg or
+                    "too many open files" in error_msg) and attempt < max_retries - 1:
+                    
+                    wait_time = 2 + attempt * 2  # Увеличивающаяся задержка: 2, 4, 6 секунд
+                    logger.warning(f"⚠️ Ошибка БД (попытка {attempt + 1}/{max_retries}): {e}")
+                    logger.warning(f"⏳ Ожидание {wait_time} секунд перед повтором...")
+                    await asyncio.sleep(wait_time)
                     continue
                 else:
-                    logger.error(f"Ошибка при сохранении войны (попытка {attempt + 1}): {e}")
+                    logger.error(f"❌ Ошибка при сохранении войны (попытка {attempt + 1}): {e}")
                     if attempt == max_retries - 1:
                         return False
         
