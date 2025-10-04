@@ -49,3 +49,22 @@ demo_*.py
 # Logs
 *.log
 logs/
+
+# Go files (project migrated to Python)
+*.go
+go.mod
+go.sum
+internal/
+
+# Temporary and deprecated files
+validate*.py
+errors.py
+*.tmp
+*.bak
+*.old
+
+# OS generated files
+Thumbs.db
+*.swp
+*.swo
+*~
