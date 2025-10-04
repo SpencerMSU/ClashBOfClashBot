@@ -216,6 +216,11 @@ class ClashBot:
     async def _start_clan_scanner(self):
         """Запуск сканера кланов"""
         try:
+            # Проверяем, нужно ли запускать глобальное сканирование
+            if not config.ENABLE_GLOBAL_CLAN_SCANNING:
+                logger.info("Глобальное сканирование кланов отключено в конфигурации")
+                return
+            
             self.clan_scanner = ClanScanner(
                 db_service=self.db_service,
                 coc_client=self.coc_client

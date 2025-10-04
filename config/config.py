@@ -63,6 +63,10 @@ class BotConfig:
         self.ARCHIVE_CHECK_INTERVAL: int = int(os.getenv('ARCHIVE_CHECK_INTERVAL', '900'))  # 15 минут
         self.DONATION_SNAPSHOT_INTERVAL: int = int(os.getenv('DONATION_SNAPSHOT_INTERVAL', '21600'))  # 6 часов
         
+        # Настройки сканера кланов
+        self.ENABLE_GLOBAL_CLAN_SCANNING: bool = os.getenv('ENABLE_GLOBAL_CLAN_SCANNING', 'false').lower() == 'true'
+        self.SCAN_ONLY_OUR_CLAN: bool = os.getenv('SCAN_ONLY_OUR_CLAN', 'true').lower() == 'true'
+        
         # Валидация обязательных параметров
         self._validate_config()
     
