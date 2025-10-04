@@ -5,7 +5,7 @@ import os
 from typing import Optional
 
 
-def _read_api_tokens(filename: str = 'config/api_tokens.txt') -> dict:
+def _read_api_tokens(filename: str = 'api_tokens.txt') -> dict:
     """Чтение API токенов из текстового файла"""
     tokens = {}
     
@@ -14,8 +14,8 @@ def _read_api_tokens(filename: str = 'config/api_tokens.txt') -> dict:
         if os.path.exists(filename):
             filepath = filename
         else:
-            # Если не найден, ищем в директории скрипта
-            script_dir = os.path.dirname(os.path.abspath(__file__))
+            # Если не найден, ищем в корневой директории проекта (на уровень выше config)
+            script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             filepath = os.path.join(script_dir, filename)
         
         if os.path.exists(filepath):
