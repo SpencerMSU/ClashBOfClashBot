@@ -73,9 +73,9 @@ class UltraClanScanner:
         # Кэш обработанных кланов
         self.processed_clans: Set[str] = set()
         
-        # Параллельность и производительность (УМЕНЬШЕНО для стабильности)
-        self.max_concurrent_requests = 20  # Уменьшено с 50 до 20 для избежания thread limit
-        self.requests_per_second = 50      # Уменьшено с 100 до 50 для стабильности
+        # Параллельность и производительность (ОПТИМИЗИРОВАНО)
+        self.max_concurrent_requests = 25  # Немного увеличено для лучшей скорости
+        self.requests_per_second = 60      # Увеличено с учетом оптимизации rate limit
         self.semaphore = asyncio.Semaphore(self.max_concurrent_requests)
         
         # Пул соединений для максимальной производительности
@@ -377,6 +377,13 @@ class UltraClanScanner:
                 await task
                 completed += 1
                 logger.info(f"📍 Завершено локаций: {completed}/{len(self.location_ids)}")
+                
+                # Периодическая очистка памяти каждые 10 локаций
+                if completed % 10 == 0:
+                    import gc
+                    gc.collect()
+                    logger.debug(f"🧹 Очистка памяти выполнена ({completed} локаций)")
+                    
             except Exception as e:
                 logger.error(f"💥 Ошибка при сканировании локации: {e}")
                 self.errors_count += 1
@@ -420,25 +427,33 @@ class UltraClanScanner:
             
             logger.info(f"✅ Локация {location_id}: найдено {len(all_clans)} уникальных кланов")
             
-            # Параллельно обрабатываем все кланы
-            clan_tasks = []
-            for clan in all_clans:
+            # ОПТИМИЗИРОВАННАЯ параллельная обработка кланов
+            start_time = time.time()
+            processed_count = 0
+            
+            # Создаем семафор для ограничения одновременных операций с кланами
+            clan_semaphore = asyncio.Semaphore(15)  # Уменьшено для стабильности
+            
+            async def process_clan_with_semaphore(clan):
+                nonlocal processed_count
                 clan_tag = clan.get('tag')
                 if clan_tag and clan_tag not in self.processed_clans:
-                    task = asyncio.create_task(self._process_clan_ultra(clan_tag))
-                    clan_tasks.append(task)
+                    async with clan_semaphore:
+                        await self._process_clan_ultra(clan_tag)
+                        processed_count += 1
+                        
+                        # Прогресс каждые 50 кланов
+                        if processed_count % 50 == 0:
+                            elapsed = time.time() - start_time
+                            rate = processed_count / elapsed if elapsed > 0 else 0
+                            logger.info(f"📊 Локация {location_id}: обработано {processed_count}/{len(all_clans)} кланов ({rate:.1f}/сек)")
             
-            # Выполняем обработку кланов пакетами для контроля нагрузки
-            batch_size = 20
-            for i in range(0, len(clan_tasks), batch_size):
-                batch = clan_tasks[i:i + batch_size]
-                await asyncio.gather(*batch, return_exceptions=True)
-                
-                # Добавляем небольшую паузу между пакетами
-                if i + batch_size < len(clan_tasks):
-                    await asyncio.sleep(0.1)
+            # Обрабатываем всех кланов с контролируемой параллельностью
+            clan_tasks = [process_clan_with_semaphore(clan) for clan in all_clans]
+            await asyncio.gather(*clan_tasks, return_exceptions=True)
             
-            logger.info(f"🎯 Локация {location_id}: обработка завершена")
+            elapsed = time.time() - start_time
+            logger.info(f"🎯 Локация {location_id}: обработка завершена за {elapsed:.1f}с ({processed_count} кланов)")
             
         except Exception as e:
             logger.error(f"💥 Ошибка при сканировании локации {location_id}: {e}")
@@ -523,19 +538,16 @@ class UltraClanScanner:
                     if not wars:
                         return
                     
-                    # Параллельно обрабатываем все войны клана
-                    import_tasks = []
+                    # ОПТИМИЗИРОВАННАЯ обработка войн (без лишних gather)
+                    imported_count = 0
                     for war_entry in wars:
                         if war_entry.get('result') in ['win', 'lose', 'tie']:
-                            task = asyncio.create_task(self._import_war_ultra(war_entry))
-                            import_tasks.append(task)
+                            success = await self._import_war_ultra(war_entry)
+                            if success:
+                                imported_count += 1
                     
-                    if import_tasks:
-                        results = await asyncio.gather(*import_tasks, return_exceptions=True)
-                        imported = sum(1 for r in results if r is True)
-                        
-                        if imported > 0:
-                            logger.debug(f"⚡ Клан {clan_tag}: импортировано {imported} войн")
+                    if imported_count > 0:
+                        logger.debug(f"⚡ Клан {clan_tag}: импортировано {imported_count} войн")
         
         except Exception as e:
             logger.debug(f"💥 Ошибка обработки клана {clan_tag}: {e}")
@@ -594,17 +606,25 @@ class UltraClanScanner:
             return False
     
     async def _rate_limit(self):
-        """Контроль скорости запросов"""
+        """Оптимизированный контроль скорости запросов"""
         now = time.time()
         
         # Удаляем старые записи (старше 1 секунды)
         self.request_times = [t for t in self.request_times if now - t < 1.0]
         
-        # Если достигли лимита, ждем
+        # Проверяем лимит
         if len(self.request_times) >= self.requests_per_second:
-            sleep_time = 1.0 - (now - self.request_times[0])
+            # Минимальная задержка для предотвращения накопления
+            oldest_request = self.request_times[0]
+            sleep_time = 1.0 - (now - oldest_request)
+            
+            # Ограничиваем максимальную задержку
             if sleep_time > 0:
+                sleep_time = min(sleep_time, 0.1)  # Максимум 100ms
                 await asyncio.sleep(sleep_time)
+                
+            # Обновляем время после сна
+            now = time.time()
         
         self.request_times.append(now)
     
