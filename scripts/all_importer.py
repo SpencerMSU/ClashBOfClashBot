@@ -15,6 +15,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
+# Добавление корневой папки проекта в путь Python
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
+
 # Установка переменных окружения перед импортом config
 if not os.getenv('BOT_TOKEN'):
     os.environ['BOT_TOKEN'] = 'DUMMY_TOKEN_FOR_IMPORT'
