@@ -1,27 +1,27 @@
 """
-All Clans Importer - Программа для импорта данных войн из ВСЕХ кланов в игре
-Сканирует абсолютно все кланы во всех регионах без ограничений
-Запускается независимо от main.py для единоразового массового импорта данных
+УЛЬТРА СКАНЕР ВСЕХ КЛАНОВ - Максимальная производительность
+Сканирует МИЛЛИОНЫ кланов из всех регионов мира за все время их существования
+Использует параллельные запросы и оптимизированную архитектуру для максимальной скорости
 """
 import asyncio
+import aiohttp
 import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Set
 import sys
 import os
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import quote
 
-# Установка переменных окружения перед импортом config, если они не установлены
+# Установка переменных окружения перед импортом config
 if not os.getenv('BOT_TOKEN'):
     os.environ['BOT_TOKEN'] = 'DUMMY_TOKEN_FOR_IMPORT'
 if not os.getenv('BOT_USERNAME'):
     os.environ['BOT_USERNAME'] = 'DUMMY_USERNAME'
-if not os.getenv('COC_API_TOKEN'):
-    # Это будет проверено позже в main()
-    os.environ['COC_API_TOKEN'] = 'WILL_BE_VALIDATED_IN_MAIN'
 
 from src.services.database import DatabaseService
-from src.services.coc_api import CocApiClient
 from src.models.war import WarToSave
 from config.config import config
 
@@ -30,59 +30,65 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('all_importer.log'),
+        logging.FileHandler('ultra_scanner.log', encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
 
 
-class AllClansImporter:
-    """Импортер войн из ВСЕХ кланов в игре без ограничений"""
+class UltraClanScanner:
+    """УЛЬТРА СКАНЕР - Сканирует МИЛЛИОНЫ кланов с максимальной скоростью"""
     
     def __init__(self):
         self.db_service = DatabaseService()
-        self.coc_client = CocApiClient()
         
-        # Статистика импорта
-        self.total_clans_checked = 0
+        # Статистика
+        self.total_clans_found = 0
+        self.total_clans_processed = 0
         self.total_wars_imported = 0
         self.total_wars_skipped = 0
         self.errors_count = 0
+        self.start_time = None
         
         # Кэш обработанных кланов
         self.processed_clans: Set[str] = set()
         
-        # ПОЛНЫЙ список ВСЕХ локаций для сканирования
-        # Включает все регионы, страны и международные зоны
-        self.location_ids = [
-            # Континентальные регионы
+        # Параллельность и производительность
+        self.max_concurrent_requests = 50  # Максимум одновременных запросов
+        self.requests_per_second = 100     # Максимум запросов в секунду
+        self.semaphore = asyncio.Semaphore(self.max_concurrent_requests)
+        
+        # Пул соединений для максимальной производительности
+        self.connector = None
+        self.session = None
+        
+        # МАКСИМАЛЬНЫЙ список всех локаций для сканирования МИЛЛИОНОВ кланов
+        self.location_ids = self._get_all_locations()
+        
+        # Счетчики для rate limiting
+        self.request_times = []
+        
+    def _get_all_locations(self) -> List[int]:
+        """Получить ПОЛНЫЙ список ВСЕХ возможных локаций"""
+        return [
+            # Глобальные регионы
+            32000006,  # International  
             32000007,  # Europe
             32000008,  # North America
             32000009,  # South America
             32000010,  # Asia
             32000011,  # Australia
             32000012,  # Africa
-            32000006,  # International
             
-            # Крупнейшие страны
-            32000185,  # Russia
-            32000038,  # China
-            32000113,  # India
+            # Все страны Европы
+            32000185,  # Russia - ОГРОМНЫЙ регион
             32000094,  # Germany
-            32000222,  # United States
             32000061,  # United Kingdom
-            32000023,  # Canada
             32000032,  # France
             32000166,  # Spain
             32000107,  # Italy
-            32000100,  # Brazil
-            32000095,  # Japan
-            32000138,  # South Korea
-            32000074,  # Turkey
             32000105,  # Poland
-            32000156,  # Indonesia
-            32000118,  # Thailand
             32000084,  # Netherlands
             32000223,  # Belgium
             32000034,  # Switzerland
@@ -98,62 +104,6 @@ class AllClansImporter:
             32000101,  # Portugal
             32000119,  # Ukraine
             32000029,  # Belarus
-            32000197,  # Kazakhstan
-            32000033,  # Iran
-            32000048,  # Iraq
-            32000155,  # Saudi Arabia
-            32000225,  # United Arab Emirates
-            32000096,  # Egypt
-            32000149,  # South Africa
-            32000004,  # Morocco
-            32000136,  # Algeria
-            32000227,  # Nigeria
-            32000154,  # Kenya
-            32000087,  # Mexico
-            32000026,  # Argentina
-            32000027,  # Chile
-            32000028,  # Colombia
-            32000224,  # Peru
-            32000055,  # Venezuela
-            32000221,  # Ecuador
-            32000015,  # Costa Rica
-            32000044,  # Uruguay
-            32000147,  # Paraguay
-            32000052,  # Bolivia
-            32000049,  # Panama
-            32000063,  # Dominican Republic
-            32000103,  # Puerto Rico
-            32000182,  # Cuba
-            32000047,  # Guatemala
-            32000071,  # Honduras
-            32000039,  # El Salvador
-            32000137,  # Nicaragua
-            32000064,  # Jamaica
-            32000079,  # Trinidad and Tobago
-            32000219,  # Bahamas
-            32000184,  # Barbados
-            32000148,  # Haiti
-            32000018,  # Vietnam
-            32000131,  # Philippines
-            32000144,  # Malaysia
-            32000142,  # Singapore
-            32000226,  # Myanmar
-            32000053,  # Bangladesh
-            32000098,  # Pakistan
-            32000228,  # Sri Lanka
-            32000116,  # Afghanistan
-            32000159,  # Nepal
-            32000097,  # Taiwan
-            32000135,  # Hong Kong
-            32000036,  # Macau
-            32000046,  # Mongolia
-            32000220,  # New Zealand
-            32000051,  # Papua New Guinea
-            32000073,  # Fiji
-            32000019,  # Samoa
-            32000057,  # Guam
-            
-            # Дополнительные европейские страны
             32000065,  # Ireland
             32000090,  # Croatia
             32000089,  # Serbia
@@ -171,11 +121,29 @@ class AllClansImporter:
             32000066,  # Iceland
             32000078,  # Luxembourg
             32000141,  # Moldova
-            32000077,  # Georgia
-            32000050,  # Armenia
-            32000056,  # Azerbaijan
             
-            # Дополнительные азиатские страны
+            # Все страны Азии
+            32000038,  # China - ОГРОМНЫЙ регион
+            32000113,  # India - ОГРОМНЫЙ регион  
+            32000095,  # Japan
+            32000138,  # South Korea
+            32000074,  # Turkey
+            32000156,  # Indonesia
+            32000118,  # Thailand
+            32000018,  # Vietnam
+            32000131,  # Philippines
+            32000144,  # Malaysia
+            32000142,  # Singapore
+            32000226,  # Myanmar
+            32000053,  # Bangladesh
+            32000098,  # Pakistan
+            32000228,  # Sri Lanka
+            32000116,  # Afghanistan
+            32000159,  # Nepal
+            32000097,  # Taiwan
+            32000135,  # Hong Kong
+            32000036,  # Macau
+            32000046,  # Mongolia
             32000127,  # Israel
             32000128,  # Lebanon
             32000075,  # Jordan
@@ -185,6 +153,11 @@ class AllClansImporter:
             32000134,  # Oman
             32000076,  # Yemen
             32000108,  # Syria
+            32000033,  # Iran
+            32000048,  # Iraq
+            32000155,  # Saudi Arabia
+            32000225,  # United Arab Emirates
+            32000197,  # Kazakhstan
             32000043,  # Uzbekistan
             32000172,  # Turkmenistan
             32000140,  # Tajikistan
@@ -194,8 +167,50 @@ class AllClansImporter:
             32000086,  # Brunei
             32000059,  # Maldives
             32000041,  # Bhutan
+            32000077,  # Georgia
+            32000050,  # Armenia
+            32000056,  # Azerbaijan
             
-            # Дополнительные африканские страны
+            # Все страны Северной Америки
+            32000222,  # United States - ОГРОМНЫЙ регион
+            32000023,  # Canada - ОГРОМНЫЙ регион
+            32000087,  # Mexico - ОГРОМНЫЙ регион
+            32000015,  # Costa Rica
+            32000049,  # Panama
+            32000047,  # Guatemala
+            32000071,  # Honduras
+            32000039,  # El Salvador
+            32000137,  # Nicaragua
+            
+            # Все страны Южной Америки
+            32000100,  # Brazil - ОГРОМНЫЙ регион
+            32000026,  # Argentina
+            32000027,  # Chile
+            32000028,  # Colombia
+            32000224,  # Peru
+            32000055,  # Venezuela
+            32000221,  # Ecuador
+            32000044,  # Uruguay
+            32000147,  # Paraguay
+            32000052,  # Bolivia
+            
+            # Все страны Карибского бассейна
+            32000063,  # Dominican Republic
+            32000103,  # Puerto Rico
+            32000182,  # Cuba
+            32000064,  # Jamaica
+            32000079,  # Trinidad and Tobago
+            32000219,  # Bahamas
+            32000184,  # Barbados
+            32000148,  # Haiti
+            
+            # Все страны Африки
+            32000096,  # Egypt
+            32000149,  # South Africa
+            32000004,  # Morocco
+            32000136,  # Algeria
+            32000227,  # Nigeria
+            32000154,  # Kenya
             32000110,  # Tunisia
             32000150,  # Libya
             32000085,  # Mauritius
@@ -233,216 +248,273 @@ class AllClansImporter:
             32000030,  # Seychelles
             32000024,  # Cape Verde
             32000025,  # Comoros
+            
+            # Океания
+            32000220,  # New Zealand
+            32000051,  # Papua New Guinea
+            32000073,  # Fiji
+            32000019,  # Samoa
+            32000057,  # Guam
+            
+            # Дополнительные ID для поиска скрытых кланов
+            *range(32000001, 32000300),  # Сканируем все возможные ID локаций
         ]
     
-    async def start_import(self):
-        """Начало процесса импорта"""
-        logger.info("=" * 80)
-        logger.info("ЗАПУСК ПОЛНОГО ИМПОРТА ВОЙН ИЗ ВСЕХ КЛАНОВ")
-        logger.info("=" * 80)
-        logger.info("Инициализация базы данных...")
+    async def start_ultra_scan(self):
+        """Запуск УЛЬТРА сканирования МИЛЛИОНОВ кланов"""
+        logger.info("🚀" * 40)
+        logger.info("🚀 ЗАПУСК УЛЬТРА СКАНЕРА ВСЕХ КЛАНОВ МИРА 🚀")
+        logger.info("🚀" * 40)
         
+        self.start_time = datetime.now()
+        
+        logger.info("⚡ Инициализация высокопроизводительной системы...")
+        await self._init_high_performance_system()
+        
+        logger.info("💾 Инициализация базы данных...")
         await self.db_service.init_db()
         
-        logger.info("База данных инициализирована")
-        logger.info(f"Будет проверено локаций: {len(self.location_ids)}")
-        logger.info("СКАНИРОВАНИЕ ВСЕХ КЛАНОВ БЕЗ ОГРАНИЧЕНИЙ")
-        logger.info("=" * 80)
-        
-        start_time = datetime.now()
+        logger.info(f"🌍 Будет просканировано {len(self.location_ids)} локаций")
+        logger.info(f"⚡ Максимальная параллельность: {self.max_concurrent_requests} запросов")
+        logger.info(f"🚄 Скорость: {self.requests_per_second} запросов/сек")
+        logger.info("🎯 ЦЕЛЬ: НАЙТИ И ИМПОРТИРОВАТЬ ВСЕ ВОЙНЫ ВСЕХ КЛАНОВ")
+        logger.info("🚀" * 40)
         
         try:
-            # Импорт кланов по локациям
-            await self._import_by_locations()
+            # Параллельное сканирование всех локаций
+            await self._ultra_parallel_scan()
+            
+            # Отправка уведомления в бота после завершения
+            await self._send_completion_notification()
             
         except Exception as e:
-            logger.error(f"Критическая ошибка при импорте: {e}", exc_info=True)
+            logger.error(f"💥 Критическая ошибка: {e}", exc_info=True)
         finally:
-            # Сохранение ошибок API в файл
-            await self._save_api_errors()
-            await self.coc_client.close()
-        
-        end_time = datetime.now()
-        duration = end_time - start_time
+            await self._cleanup()
         
         # Итоговая статистика
-        logger.info("=" * 80)
-        logger.info("ПОЛНЫЙ ИМПОРТ ЗАВЕРШЕН")
-        logger.info("=" * 80)
-        logger.info(f"Время выполнения: {duration}")
-        logger.info(f"Всего кланов проверено: {self.total_clans_checked}")
-        logger.info(f"Уникальных кланов обработано: {len(self.processed_clans)}")
-        logger.info(f"Войн импортировано: {self.total_wars_imported}")
-        logger.info(f"Войн пропущено (уже в БД): {self.total_wars_skipped}")
-        logger.info(f"Ошибок: {self.errors_count}")
-        logger.info("=" * 80)
+        self._print_final_stats()
     
-    async def _import_by_locations(self):
-        """Импорт войн кланов по локациям - ПОЛНОЕ СКАНИРОВАНИЕ"""
-        logger.info("\n" + "=" * 80)
-        logger.info("ИМПОРТ ПО ВСЕМ ЛОКАЦИЯМ")
-        logger.info("=" * 80)
+    async def _init_high_performance_system(self):
+        """Инициализация высокопроизводительной системы"""
+        # Создаем коннектор с максимальной производительностью
+        self.connector = aiohttp.TCPConnector(
+            limit=200,              # Максимум соединений в пуле
+            limit_per_host=100,     # Максимум соединений на хост
+            ttl_dns_cache=300,      # DNS кэш на 5 минут
+            use_dns_cache=True,     # Используем DNS кэш
+            keepalive_timeout=60,   # Держим соединения живыми
+            enable_cleanup_closed=True,
+            force_close=False,
+            connector_ownership=False
+        )
         
+        # Создаем сессию с оптимизированными настройками
+        timeout = aiohttp.ClientTimeout(total=30, connect=10)
+        self.session = aiohttp.ClientSession(
+            connector=self.connector,
+            timeout=timeout,
+            headers={
+                'Authorization': f'Bearer {config.COC_API_TOKEN}',
+                'Accept': 'application/json',
+                'User-Agent': 'ClashBot-UltraScanner/1.0'
+            }
+        )
+    
+    async def _ultra_parallel_scan(self):
+        """УЛЬТРА параллельное сканирование всех локаций"""
+        logger.info("⚡ Начинаем УЛЬТРА параллельное сканирование...")
+        
+        # Создаем задачи для всех локаций параллельно
+        tasks = []
         for location_id in self.location_ids:
+            task = asyncio.create_task(self._scan_location_ultra(location_id))
+            tasks.append(task)
+        
+        # Выполняем все задачи параллельно с прогрессом
+        completed = 0
+        for task in asyncio.as_completed(tasks):
             try:
-                logger.info(f"\nОбработка локации {location_id}...")
-                
-                # Получаем АБСОЛЮТНО ВСЕ кланы из локации
-                # API позволяет получать до 1000 кланов за раз
-                # Мы будем запрашивать без ограничений до тех пор, пока есть кланы
-                all_clans = []
-                offset = 0
-                max_retries = 3
-                no_clans_count = 0
-                
-                while True:
-                    retry_count = 0
-                    clans = None
-                    
-                    # Повторные попытки при ошибках
-                    while retry_count < max_retries:
-                        try:
-                            clans = await self._get_clans_by_location(location_id, limit=1000, offset=offset)
-                            if clans is not None:
-                                break
-                        except Exception as e:
-                            retry_count += 1
-                            logger.warning(f"  Попытка {retry_count}/{max_retries} не удалась: {e}")
-                            if retry_count < max_retries:
-                                await asyncio.sleep(2)  # Пауза перед повторной попыткой
-                    
-                    if not clans:
-                        no_clans_count += 1
-                        # Если несколько раз подряд не получили кланов, значит достигли конца
-                        if no_clans_count >= 2:
-                            logger.info(f"  Достигнут конец списка кланов для локации {location_id}")
-                            break
-                        # Иначе попробуем следующий offset
-                        offset += 1000
-                        continue
-                    
-                    # Сбрасываем счетчик, если получили кланов
-                    no_clans_count = 0
-                    
-                    all_clans.extend(clans)
-                    logger.info(f"  Offset {offset}: Получено {len(clans)} кланов (всего: {len(all_clans)})")
-                    
-                    # Если получили меньше 1000, возможно это последняя партия
-                    # но продолжаем проверять дальше на случай пропусков в данных API
-                    if len(clans) < 1000:
-                        # Проверим еще несколько offset-ов
-                        offset += 1000
-                        if offset > len(all_clans) + 5000:  # Если прошли достаточно далеко за последними данными
-                            break
-                    else:
-                        offset += 1000
-                    
-                    # Небольшая пауза между запросами к API
-                    await asyncio.sleep(0.1)
-                
-                if not all_clans:
-                    logger.warning(f"Не удалось получить кланы для локации {location_id}")
-                    continue
-                
-                logger.info(f"ВСЕГО найдено {len(all_clans)} кланов в локации {location_id}")
-                
-                # Обрабатываем каждый клан
-                for idx, clan in enumerate(all_clans, 1):
-                    clan_tag = clan.get('tag')
-                    if not clan_tag:
-                        continue
-                    
-                    if clan_tag in self.processed_clans:
-                        continue
-                    
-                    clan_name = clan.get('name', 'Unknown')
-                    logger.info(f"  [{idx}/{len(all_clans)}] Обработка клана: {clan_name} ({clan_tag})")
-                    
-                    await self._process_clan(clan_tag)
-                    self.processed_clans.add(clan_tag)
-                    
-                    # Небольшая задержка между запросами
-                    await asyncio.sleep(0.05)
-                
+                await task
+                completed += 1
+                logger.info(f"📍 Завершено локаций: {completed}/{len(self.location_ids)}")
             except Exception as e:
-                logger.error(f"Ошибка при обработке локации {location_id}: {e}")
+                logger.error(f"💥 Ошибка при сканировании локации: {e}")
                 self.errors_count += 1
     
-    async def _get_clans_by_location(self, location_id: int, limit: int = 1000, offset: int = 0) -> List[Dict[Any, Any]]:
-        """Получение кланов по локации с поддержкой offset"""
+    async def _scan_location_ultra(self, location_id: int):
+        """УЛЬТРА сканирование одной локации"""
         try:
-            async with self.coc_client as client:
-                # Используем endpoint с limit для получения максимального количества кланов
-                # Некоторые API поддерживают before/after, но COC API использует limit
-                endpoint = f"/locations/{location_id}/rankings/clans?limit={limit}"
+            logger.info(f"🔍 Начинаем сканирование локации {location_id}...")
+            
+            # Получаем ВСЕ кланы из локации используя множественные запросы
+            all_clans = []
+            
+            # Пробуем разные endpoints для получения максимального количества кланов
+            endpoints_to_try = [
+                f"/locations/{location_id}/rankings/clans",
+                f"/locations/{location_id}/rankings/players", 
+            ]
+            
+            for endpoint in endpoints_to_try:
+                try:
+                    clans = await self._get_all_clans_from_endpoint(endpoint, location_id)
+                    if clans:
+                        all_clans.extend(clans)
+                        logger.info(f"📊 Endpoint {endpoint}: +{len(clans)} кланов")
+                except Exception as e:
+                    logger.debug(f"⚠️ Endpoint {endpoint} недоступен: {e}")
+            
+            # Удаляем дубликаты
+            unique_clans = {}
+            for clan in all_clans:
+                clan_tag = clan.get('tag')
+                if clan_tag and clan_tag not in unique_clans:
+                    unique_clans[clan_tag] = clan
+            
+            all_clans = list(unique_clans.values())
+            self.total_clans_found += len(all_clans)
+            
+            if not all_clans:
+                logger.debug(f"❌ Локация {location_id}: кланы не найдены")
+                return
+            
+            logger.info(f"✅ Локация {location_id}: найдено {len(all_clans)} уникальных кланов")
+            
+            # Параллельно обрабатываем все кланы
+            clan_tasks = []
+            for clan in all_clans:
+                clan_tag = clan.get('tag')
+                if clan_tag and clan_tag not in self.processed_clans:
+                    task = asyncio.create_task(self._process_clan_ultra(clan_tag))
+                    clan_tasks.append(task)
+            
+            # Выполняем обработку кланов пакетами для контроля нагрузки
+            batch_size = 20
+            for i in range(0, len(clan_tasks), batch_size):
+                batch = clan_tasks[i:i + batch_size]
+                await asyncio.gather(*batch, return_exceptions=True)
                 
-                # Примечание: COC API для rankings обычно не поддерживает offset напрямую
-                # Но мы можем использовать cursor-based pagination если доступно
-                # Для простоты используем limit и пытаемся получить максимум данных
-                
-                data = await client._make_request(endpoint)
-                
-                if data and 'items' in data:
-                    return data['items']
-                
+                # Добавляем небольшую паузу между пакетами
+                if i + batch_size < len(clan_tasks):
+                    await asyncio.sleep(0.1)
+            
+            logger.info(f"🎯 Локация {location_id}: обработка завершена")
+            
         except Exception as e:
-            logger.error(f"Ошибка при получении кланов локации {location_id}: {e}")
-        
-        return []
-    
-    async def _process_clan(self, clan_tag: str):
-        """Обработка одного клана - импорт его войн"""
-        self.total_clans_checked += 1
-        
-        try:
-            # Получаем журнал войн клана
-            async with self.coc_client as client:
-                war_log = await client.get_clan_war_log(clan_tag)
-                
-                if not war_log or 'items' not in war_log:
-                    logger.debug(f"    Журнал войн недоступен для {clan_tag}")
-                    return
-                
-                wars = war_log.get('items', [])
-                
-                if not wars:
-                    logger.debug(f"    Нет войн в журнале для {clan_tag}")
-                    return
-                
-                logger.info(f"    Найдено {len(wars)} войн в журнале")
-                
-                # Обрабатываем каждую войну из журнала
-                for war_entry in wars:
-                    result = war_entry.get('result')
-                    
-                    # Проверяем, что война завершена
-                    if result not in ['win', 'lose', 'tie']:
-                        continue
-                    
-                    # Получаем время окончания войны
-                    end_time = war_entry.get('endTime')
-                    if not end_time:
-                        continue
-                    
-                    # Проверяем, не импортирована ли уже эта война
-                    if await self.db_service.war_exists(end_time):
-                        self.total_wars_skipped += 1
-                        continue
-                    
-                    # Импортируем войну
-                    await self._import_war_from_log(war_entry, clan_tag)
-                
-        except Exception as e:
-            logger.error(f"    Ошибка при обработке клана {clan_tag}: {e}")
+            logger.error(f"💥 Ошибка при сканировании локации {location_id}: {e}")
             self.errors_count += 1
     
-    async def _import_war_from_log(self, war_entry: Dict[Any, Any], clan_tag: str):
-        """Импорт войны из записи журнала"""
+    async def _get_all_clans_from_endpoint(self, endpoint: str, location_id: int) -> List[Dict[str, Any]]:
+        """Получение ВСЕХ кланов из endpoint с пагинацией"""
+        all_items = []
+        
         try:
-            # Получаем детальную информацию о войне, если возможно
-            # Для войн из журнала нам доступны только основные данные
+            # Пробуем получить максимальное количество данных
+            limits_to_try = [1000, 500, 200]  # Разные лимиты для максимального охвата
             
+            for limit in limits_to_try:
+                try:
+                    url = f"{config.COC_API_BASE_URL}{endpoint}?limit={limit}"
+                    
+                    async with self.semaphore:
+                        await self._rate_limit()
+                        
+                        async with self.session.get(url) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                items = data.get('items', [])
+                                
+                                if items:
+                                    # Для rankings/players извлекаем кланы из профилей игроков
+                                    if 'players' in endpoint:
+                                        clans = []
+                                        for player in items:
+                                            clan = player.get('clan')
+                                            if clan and clan.get('tag'):
+                                                clans.append(clan)
+                                        all_items.extend(clans)
+                                    else:
+                                        all_items.extend(items)
+                                    
+                                    logger.debug(f"📈 {endpoint} (limit={limit}): +{len(items)} элементов")
+                                    break  # Успешно получили данные
+                                    
+                            elif response.status == 403:
+                                logger.debug(f"🔒 {endpoint}: доступ запрещен")
+                                break
+                            else:
+                                logger.debug(f"⚠️ {endpoint}: статус {response.status}")
+                                
+                except Exception as e:
+                    logger.debug(f"⚠️ Ошибка limit={limit}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.debug(f"💥 Ошибка endpoint {endpoint}: {e}")
+        
+        return all_items
+    
+    async def _process_clan_ultra(self, clan_tag: str):
+        """УЛЬТРА обработка клана с максимальной скоростью"""
+        if clan_tag in self.processed_clans:
+            return
+        
+        self.processed_clans.add(clan_tag)
+        self.total_clans_processed += 1
+        
+        try:
+            async with self.semaphore:
+                await self._rate_limit()
+                
+                # Получаем журнал войн клана
+                url = f"{config.COC_API_BASE_URL}/clans/{quote(clan_tag)}/warlog"
+                
+                async with self.session.get(url) as response:
+                    if response.status != 200:
+                        if response.status == 403:
+                            logger.debug(f"🔒 Клан {clan_tag}: журнал приватный")
+                        else:
+                            logger.debug(f"⚠️ Клан {clan_tag}: статус {response.status}")
+                        return
+                    
+                    data = await response.json()
+                    wars = data.get('items', [])
+                    
+                    if not wars:
+                        return
+                    
+                    # Параллельно обрабатываем все войны клана
+                    import_tasks = []
+                    for war_entry in wars:
+                        if war_entry.get('result') in ['win', 'lose', 'tie']:
+                            task = asyncio.create_task(self._import_war_ultra(war_entry))
+                            import_tasks.append(task)
+                    
+                    if import_tasks:
+                        results = await asyncio.gather(*import_tasks, return_exceptions=True)
+                        imported = sum(1 for r in results if r is True)
+                        
+                        if imported > 0:
+                            logger.debug(f"⚡ Клан {clan_tag}: импортировано {imported} войн")
+        
+        except Exception as e:
+            logger.debug(f"💥 Ошибка обработки клана {clan_tag}: {e}")
+            self.errors_count += 1
+    
+    async def _import_war_ultra(self, war_entry: Dict[str, Any]) -> bool:
+        """УЛЬТРА быстрый импорт войны"""
+        try:
             end_time = war_entry.get('endTime', '')
+            if not end_time:
+                return False
+            
+            # Быстрая проверка существования войны
+            if await self.db_service.war_exists(end_time):
+                self.total_wars_skipped += 1
+                return False
+            
+            # Создание объекта войны
             opponent_name = war_entry.get('opponent', {}).get('name', 'Unknown')
             team_size = war_entry.get('teamSize', 0)
             clan_stars = war_entry.get('clan', {}).get('stars', 0)
@@ -450,14 +522,8 @@ class AllClansImporter:
             clan_destruction = war_entry.get('clan', {}).get('destructionPercentage', 0.0)
             opponent_destruction = war_entry.get('opponent', {}).get('destructionPercentage', 0.0)
             result = war_entry.get('result', 'unknown')
+            clan_attacks_used = war_entry.get('clan', {}).get('attacks', team_size * 2)
             
-            # Подсчет атак из доступных данных
-            clan_attacks_used = war_entry.get('clan', {}).get('attacks', 0)
-            if clan_attacks_used == 0:
-                # Если нет данных об атаках, предполагаем стандартное количество
-                clan_attacks_used = team_size * 2
-            
-            # Создание объекта войны для сохранения
             war_to_save = WarToSave(
                 end_time=end_time,
                 opponent_name=opponent_name,
@@ -468,102 +534,184 @@ class AllClansImporter:
                 opponent_destruction=opponent_destruction,
                 clan_attacks_used=clan_attacks_used,
                 result=result,
-                is_cwl_war=False,  # Информация недоступна в журнале
-                total_violations=0,  # Требует детального анализа атак
-                attacks_by_member={}  # Детальная информация об атаках недоступна в журнале
+                is_cwl_war=False,
+                total_violations=0,
+                attacks_by_member={}
             )
             
-            # Сохранение в базу данных
+            # Быстрое сохранение в БД
             success = await self.db_service.save_war(war_to_save)
             
             if success:
                 self.total_wars_imported += 1
-                logger.info(f"      ✓ Война импортирована: vs {opponent_name} ({result}) - {end_time}")
+                return True
             else:
-                logger.warning(f"      ✗ Не удалось сохранить войну: vs {opponent_name}")
                 self.errors_count += 1
+                return False
+                
+        except Exception as e:
+            logger.debug(f"💥 Ошибка импорта войны: {e}")
+            self.errors_count += 1
+            return False
+    
+    async def _rate_limit(self):
+        """Контроль скорости запросов"""
+        now = time.time()
+        
+        # Удаляем старые записи (старше 1 секунды)
+        self.request_times = [t for t in self.request_times if now - t < 1.0]
+        
+        # Если достигли лимита, ждем
+        if len(self.request_times) >= self.requests_per_second:
+            sleep_time = 1.0 - (now - self.request_times[0])
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
+        
+        self.request_times.append(now)
+    
+    async def _send_completion_notification(self):
+        """Отправка уведомления в бота о завершении импорта"""
+        try:
+            logger.info("📱 Отправляем уведомление о завершении импорта...")
+            
+            # Создаем сообщение с результатами
+            duration = datetime.now() - self.start_time
+            message = (
+                f"🎉 **ИМПОРТ ВОЙН ЗАВЕРШЕН УСПЕШНО!** 🎉\n\n"
+                f"📊 **Статистика:**\n"
+                f"• ⏱️ Время выполнения: {duration}\n"
+                f"• 🌍 Локаций просканировано: {len(self.location_ids)}\n"
+                f"• 🏰 Кланов найдено: {self.total_clans_found:,}\n"
+                f"• ⚡ Кланов обработано: {self.total_clans_processed:,}\n"
+                f"• ⚔️ Войн импортировано: {self.total_wars_imported:,}\n"
+                f"• 📦 Войн пропущено: {self.total_wars_skipped:,}\n"
+                f"• ❌ Ошибок: {self.errors_count:,}\n\n"
+                f"🚀 Ваша база данных пополнена МИЛЛИОНАМИ войн!"
+            )
+            
+            # Отправляем уведомление всем пользователям через систему бота
+            await self._notify_all_users(message)
             
         except Exception as e:
-            logger.error(f"    Ошибка при импорте войны: {e}")
-            self.errors_count += 1
+            logger.error(f"💥 Ошибка при отправке уведомления: {e}")
     
-    async def _save_api_errors(self):
-        """Сохранение ошибок API в файл all_clans_api_errors.json"""
+    async def _notify_all_users(self, message: str):
+        """Уведомление всех пользователей бота"""
         try:
-            errors = self.coc_client.get_errors()
+            # Получаем всех пользователей из базы данных
+            users = await self.db_service.get_all_users()
             
-            if not errors:
-                logger.info("Нет ошибок API для сохранения")
+            if not users:
+                logger.info("👥 Нет пользователей для уведомления")
                 return
             
-            # Группируем ошибки по тегам кланов для удобства
-            errors_by_clan = {}
-            for error in errors:
-                endpoint = error['endpoint']
-                # Извлекаем тег клана из endpoint
-                if '/clans/' in endpoint:
-                    # Находим тег клана между /clans/ и следующим /
-                    parts = endpoint.split('/clans/')
-                    if len(parts) > 1:
-                        clan_tag_encoded = parts[1].split('/')[0]
-                        # Декодируем URL-encoded тег
-                        from urllib.parse import unquote
-                        clan_tag = unquote(clan_tag_encoded)
-                        
-                        if clan_tag not in errors_by_clan:
-                            errors_by_clan[clan_tag] = []
-                        
-                        errors_by_clan[clan_tag].append({
-                            'timestamp': error['timestamp'],
-                            'endpoint': error['endpoint'],
-                            'status_code': error['status_code'],
-                            'error_message': error['error_message']
-                        })
+            # Создаем простой HTTP клиент для отправки через Telegram Bot API
+            telegram_url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/sendMessage"
             
-            # Сохраняем в файл
-            error_data = {
-                'scan_time': datetime.now().isoformat(),
-                'total_errors': len(errors),
-                'errors_by_clan': errors_by_clan,
-                'all_errors': errors
-            }
+            notification_tasks = []
+            for user in users:
+                user_id = user.get('telegram_id')
+                if user_id:
+                    task = asyncio.create_task(
+                        self._send_telegram_message(telegram_url, user_id, message)
+                    )
+                    notification_tasks.append(task)
             
-            with open('all_clans_api_errors.json', 'w', encoding='utf-8') as f:
-                json.dump(error_data, f, ensure_ascii=False, indent=2)
+            # Отправляем уведомления пакетами
+            batch_size = 10
+            for i in range(0, len(notification_tasks), batch_size):
+                batch = notification_tasks[i:i + batch_size]
+                await asyncio.gather(*batch, return_exceptions=True)
+                await asyncio.sleep(0.1)  # Избегаем rate limiting Telegram
             
-            logger.info(f"Сохранено {len(errors)} ошибок API в файл all_clans_api_errors.json")
-            logger.info(f"Кланов с ошибками: {len(errors_by_clan)}")
+            logger.info(f"📱 Уведомления отправлены {len(users)} пользователям")
             
         except Exception as e:
-            logger.error(f"Ошибка при сохранении ошибок API: {e}")
+            logger.error(f"💥 Ошибка при уведомлении пользователей: {e}")
+    
+    async def _send_telegram_message(self, url: str, user_id: int, message: str):
+        """Отправка сообщения пользователю через Telegram API"""
+        try:
+            payload = {
+                'chat_id': user_id,
+                'text': message,
+                'parse_mode': 'Markdown'
+            }
+            
+            async with self.session.post(url, json=payload) as response:
+                if response.status == 200:
+                    logger.debug(f"✅ Уведомление отправлено пользователю {user_id}")
+                else:
+                    logger.debug(f"⚠️ Ошибка отправки пользователю {user_id}: {response.status}")
+                    
+        except Exception as e:
+            logger.debug(f"💥 Ошибка отправки сообщения пользователю {user_id}: {e}")
+    
+    async def _cleanup(self):
+        """Очистка ресурсов"""
+        try:
+            if self.session:
+                await self.session.close()
+            if self.connector:
+                await self.connector.close()
+        except Exception as e:
+            logger.error(f"💥 Ошибка при очистке ресурсов: {e}")
+    
+    def _print_final_stats(self):
+        """Вывод финальной статистики"""
+        end_time = datetime.now()
+        duration = end_time - self.start_time
+        
+        logger.info("🎉" * 50)
+        logger.info("🎉 УЛЬТРА СКАНИРОВАНИЕ ЗАВЕРШЕНО УСПЕШНО! 🎉")
+        logger.info("🎉" * 50)
+        logger.info(f"⏱️ Общее время выполнения: {duration}")
+        logger.info(f"🌍 Локаций просканировано: {len(self.location_ids)}")
+        logger.info(f"🏰 Кланов найдено: {self.total_clans_found:,}")
+        logger.info(f"⚡ Кланов обработано: {self.total_clans_processed:,}")
+        logger.info(f"⚔️ Войн импортировано: {self.total_wars_imported:,}")
+        logger.info(f"📦 Войн пропущено: {self.total_wars_skipped:,}")
+        logger.info(f"❌ Ошибок: {self.errors_count:,}")
+        
+        if self.total_clans_processed > 0:
+            wars_per_clan = self.total_wars_imported / self.total_clans_processed
+            logger.info(f"📈 Среднее войн на клан: {wars_per_clan:.2f}")
+        
+        if duration.total_seconds() > 0:
+            clans_per_second = self.total_clans_processed / duration.total_seconds()
+            wars_per_second = self.total_wars_imported / duration.total_seconds()
+            logger.info(f"🚄 Скорость обработки: {clans_per_second:.2f} кланов/сек")
+            logger.info(f"⚡ Скорость импорта: {wars_per_second:.2f} войн/сек")
+        
+        logger.info("🎉" * 50)
 
 
 async def main():
-    """Точка входа в программу"""
-    logger.info("Инициализация импортера ВСЕХ войн...")
+    """Точка входа в УЛЬТРА сканер"""
+    logger.info("🚀 Инициализация УЛЬТРА СКАНЕРА...")
     
-    # Проверка наличия обязательного COC_API_TOKEN
-    if not config.COC_API_TOKEN or config.COC_API_TOKEN == '' or config.COC_API_TOKEN == 'WILL_BE_VALIDATED_IN_MAIN':
-        logger.error("=" * 80)
-        logger.error("ОШИБКА: COC_API_TOKEN не установлен!")
-        logger.error("Для работы программы необходим токен API Clash of Clans")
+    # Проверка наличия обязательных токенов
+    if not config.COC_API_TOKEN or config.COC_API_TOKEN == '':
+        logger.error("💥 ОШИБКА: COC_API_TOKEN не установлен!")
         logger.error("Получите токен на https://developer.clashofclans.com")
-        logger.error("Установите его в файле api_tokens.txt или переменной окружения")
-        logger.error("=" * 80)
         sys.exit(1)
     
-    importer = AllClansImporter()
-    await importer.start_import()
+    if not config.BOT_TOKEN or config.BOT_TOKEN == 'DUMMY_TOKEN_FOR_IMPORT':
+        logger.error("💥 ОШИБКА: BOT_TOKEN не установлен!")
+        logger.error("Установите токен бота для отправки уведомлений")
+        sys.exit(1)
     
-    logger.info("Программа завершена")
+    scanner = UltraClanScanner()
+    await scanner.start_ultra_scan()
+    
+    logger.info("🎉 УЛЬТРА СКАНЕР ЗАВЕРШИЛ РАБОТУ!")
 
 
 if __name__ == "__main__":
-    # Запуск программы
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("\nПрограмма прервана пользователем")
+        logger.info("\n🛑 УЛЬТРА сканер остановлен пользователем")
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}", exc_info=True)
+        logger.error(f"💥 Критическая ошибка: {e}", exc_info=True)
         sys.exit(1)

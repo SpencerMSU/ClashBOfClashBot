@@ -258,6 +258,23 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Ошибка при удалении пользователя: {e}")
             return False
+    
+    async def get_all_users(self) -> List[Dict[str, Any]]:
+        """Получение всех пользователей для уведомлений"""
+        users = []
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute(
+                    "SELECT telegram_id, player_tag FROM users"
+                ) as cursor:
+                    async for row in cursor:
+                        users.append({
+                            'telegram_id': row[0],
+                            'player_tag': row[1]
+                        })
+        except Exception as e:
+            logger.error(f"Ошибка при получении всех пользователей: {e}")
+        return users
 
     # Методы управления профилями для премиум пользователей
     async def save_user_profile(self, profile: UserProfile) -> bool:
