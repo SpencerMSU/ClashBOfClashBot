@@ -15,6 +15,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 
+# Проверка версии aiohttp для совместимости
+try:
+    aiohttp_version = aiohttp.__version__
+    logger_init = logging.getLogger(__name__)
+    logger_init.info(f"🔍 Используется aiohttp версии: {aiohttp_version}")
+except:
+    print("⚠️ Не удалось определить версию aiohttp")
+
 # Добавление корневой папки проекта в путь Python
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -310,8 +318,7 @@ class UltraClanScanner:
             use_dns_cache=True,     # Используем DNS кэш
             keepalive_timeout=60,   # Держим соединения живыми
             enable_cleanup_closed=True,
-            force_close=False,
-            connector_ownership=False
+            force_close=False
         )
         
         # Создаем сессию с оптимизированными настройками

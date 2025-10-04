@@ -18,9 +18,22 @@ fi
 
 # Проверка зависимостей
 echo "🔍 Проверка зависимостей..."
-python -c "import aiohttp, asyncio; print('✅ Зависимости OK')" 2>/dev/null || {
-    echo "❌ Отсутствуют зависимости. Установка..."
-    pip install aiohttp asyncio
+python -c "
+import aiohttp
+print(f'✅ aiohttp версия: {aiohttp.__version__}')
+
+# Тест современного API
+try:
+    connector = aiohttp.TCPConnector(limit=10)
+    print('✅ TCPConnector API совместим')
+    connector.close()
+except Exception as e:
+    print(f'❌ Несовместимый API: {e}')
+    exit(1)
+" 2>/dev/null || {
+    echo "❌ Проблемы с aiohttp. Запуск проверки зависимостей..."
+    chmod +x check_dependencies.sh
+    ./check_dependencies.sh
 }
 
 # Запуск Ultra Scanner
