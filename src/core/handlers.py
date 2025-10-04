@@ -7,10 +7,10 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
-from keyboards import Keyboards, WarSort, MemberSort, MemberView
-from user_state import UserState
-from message_generator import MessageGenerator
-from coc_api import format_clan_tag, format_player_tag
+from src.core.keyboards import Keyboards, WarSort, MemberSort, MemberView
+from src.core.user_state import UserState
+from src.core.message_generator import MessageGenerator
+from src.services.coc_api import format_clan_tag, format_player_tag
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,9 @@ class MessageHandler:
             
             elif state == UserState.AWAITING_PLAYER_TAG_TO_ADD_PROFILE:
                 await self.message_generator.handle_add_profile_tag(update, context, tag)
+            
+            elif state == UserState.AWAITING_CLAN_TAG_FOR_WAR_SCAN:
+                await self.message_generator.handle_war_scan_request(update, context, tag)
         
         except Exception as e:
             logger.error(f"Ошибка при обработке состояния {state}: {e}")
@@ -156,6 +159,9 @@ class MessageHandler:
             
             elif text == Keyboards.LINKED_CLANS_BTN:
                 await self.message_generator.handle_linked_clans_request(update, context)
+            
+            elif text == Keyboards.REQUEST_WAR_SCAN_BTN:
+                await self.message_generator.handle_war_scan_button(update, context)
             
             elif text == Keyboards.NOTIFICATIONS_BTN:
                 await self.message_generator.handle_notifications_menu(update, context)
@@ -381,6 +387,20 @@ class CallbackHandler:
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка callback-запроса"""
         query = update.callback_query
+        
+        # Add null safety checks
+        if not query:
+            logger.error("Callback query is None")
+            return
+            
+        if not query.data:
+            logger.error("Callback query data is None")
+            try:
+                await query.answer("Ошибка: пустой callback")
+            except Exception:
+                pass
+            return
+            
         await query.answer()
         
         if query.data == "noop":
@@ -388,8 +408,8 @@ class CallbackHandler:
         
         data_parts = query.data.split(":")
         callback_type = data_parts[0]
-        chat_id = query.message.chat_id
-        message_id = query.message.message_id
+        chat_id = query.message.chat_id if query.message else None
+        message_id = query.message.message_id if query.message else None
         
         try:
             if callback_type == Keyboards.MEMBERS_CALLBACK:
@@ -500,6 +520,9 @@ class CallbackHandler:
             elif callback_type == Keyboards.ACHIEVEMENTS_PAGE_CALLBACK:
                 await self._handle_achievements_page(update, context, data_parts)
             
+            elif callback_type == Keyboards.CWL_BONUS_DISTRIBUTION_CALLBACK:
+                await self._handle_cwl_bonus_distribution(update, context)
+            
             elif callback_type == "confirm_payment":
                 await self._handle_payment_confirmation(update, context, data_parts)
             
@@ -526,7 +549,16 @@ class CallbackHandler:
 
         except Exception as e:
             logger.error(f"Ошибка при обработке callback '{query.data}': {e}")
-            await query.edit_message_text("Произошла ошибка при обработке запроса.")
+            try:
+                await query.edit_message_text("Произошла ошибка при обработке запроса.")
+            except Exception as edit_error:
+                logger.error(f"Ошибка при редактировании сообщения об ошибке: {edit_error}")
+                # Fallback: try to send a new message if editing fails
+                if update.effective_chat:
+                    try:
+                        await update.effective_chat.send_message("Произошла ошибка при обработке запроса.")
+                    except Exception as send_error:
+                        logger.error(f"Не удалось отправить сообщение об ошибке: {send_error}")
     
     async def _handle_members_sort(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
                                   data_parts: list):
@@ -617,7 +649,7 @@ class CallbackHandler:
             ])
         
         await self.message_generator.display_player_info(
-            update, context, player_tag, back_keyboard
+            update, context, player_tag, back_keyboard=back_keyboard, from_callback=True
         )
     
     async def _handle_clan_info_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -887,26 +919,38 @@ class CallbackHandler:
         if len(data_parts) < 4:
             return
         
-        player_tag = data_parts[1]
-        sort_type = data_parts[2]
-        page = int(data_parts[3])
-        await self.message_generator.handle_achievements_menu(update, context, player_tag, page, sort_type)
+        try:
+            player_tag = data_parts[1]
+            sort_type = data_parts[2]
+            page = int(data_parts[3])
+            await self.message_generator.handle_achievements_menu(update, context, player_tag, page, sort_type)
+        except (ValueError, IndexError) as e:
+            logger.error(f"Ошибка при разборе данных сортировки достижений: {e}")
+            await update.callback_query.edit_message_text("❌ Ошибка в данных запроса.")
     
     async def _handle_achievements_page(self, update: Update, context: ContextTypes.DEFAULT_TYPE, data_parts: list):
         """Обработка навигации по страницам достижений"""
         if len(data_parts) < 4:
             return
         
-        player_tag = data_parts[1]
-        sort_type = data_parts[2]
-        page = int(data_parts[3])
-        await self.message_generator.handle_achievements_menu(update, context, player_tag, page, sort_type)
+        try:
+            player_tag = data_parts[1]
+            sort_type = data_parts[2]
+            page = int(data_parts[3])
+            await self.message_generator.handle_achievements_menu(update, context, player_tag, page, sort_type)
+        except (ValueError, IndexError) as e:
+            logger.error(f"Ошибка при разборе данных страницы достижений: {e}")
+            await update.callback_query.edit_message_text("❌ Ошибка в данных запроса.")
+    
+    async def _handle_cwl_bonus_distribution(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка отображения распределения бонусов ЛВК"""
+        await self.message_generator.display_cwl_bonus_distribution(update, context)
     
     async def _handle_analyzer_refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка обновления анализатора ИИ"""
         try:
             # Показываем сообщение о том, что функция в разработке
-            from translations import translation_manager
+            from src.utils.translations import translation_manager
             message = translation_manager.get_text(update, 'analyzer_coming_soon',
                 '🤖 <b>Анализатор войн</b>\n\n🚧 <b>В разработке</b>\n\nАнализатор находится в стадии разработки.\nКогда-то он будет, но не сейчас.\n\nСледите за обновлениями!')
             
@@ -923,7 +967,7 @@ class CallbackHandler:
             )
         except Exception as e:
             logger.error(f"Ошибка при обновлении анализатора: {e}")
-            from translations import translation_manager
+            from src.utils.translations import translation_manager
             error_message = translation_manager.get_text(update, 'analyzer_refresh_error',
                 '🤖 <b>Анализатор войн</b>\n\n🚧 Функция временно недоступна.\nПопробуйте позже.')
             await update.callback_query.edit_message_text(error_message, parse_mode='HTML')

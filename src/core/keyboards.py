@@ -31,6 +31,7 @@ class Keyboards:
     COMMUNITY_CENTER_BTN = "🏛️ Центр сообщества"
     ACHIEVEMENTS_BTN = "🏆 Достижения"
     ANALYZER_BTN = "🤖 Анализатор"
+    REQUEST_WAR_SCAN_BTN = "📊 Нет данных о войнах? Запросить!"
     
     # Константы для callback-данных
     MEMBERS_CALLBACK = "members"
@@ -69,6 +70,8 @@ class Keyboards:
     ACHIEVEMENTS_CALLBACK = "achievements"
     ACHIEVEMENTS_SORT_CALLBACK = "achievements_sort"
     ACHIEVEMENTS_PAGE_CALLBACK = "achievements_page"
+    CWL_BONUS_DISTRIBUTION_CALLBACK = "cwl_bonus_distribution"
+    WAR_SCAN_REQUEST_CALLBACK = "war_scan_request"
     
     @staticmethod
     def main_menu() -> ReplyKeyboardMarkup:
@@ -115,7 +118,8 @@ class Keyboards:
         """Меню клана"""
         keyboard = [
             [KeyboardButton(Keyboards.SEARCH_CLAN_BTN)],
-            [KeyboardButton(Keyboards.LINKED_CLANS_BTN)]
+            [KeyboardButton(Keyboards.LINKED_CLANS_BTN)],
+            [KeyboardButton(Keyboards.REQUEST_WAR_SCAN_BTN)]
         ]
         
         # Добавляем кнопку "Мой клан" если пользователь привязал аккаунт
@@ -134,6 +138,7 @@ class Keyboards:
             [InlineKeyboardButton("⚔️ История войн", callback_data=Keyboards.WAR_LIST_CALLBACK)],
             [InlineKeyboardButton("⚔️ Текущая война", callback_data="current_war")],
             [InlineKeyboardButton("🏆 ЛВК", callback_data="cwl_info")],
+            [InlineKeyboardButton("💎 Распределение бонусов ЛВК", callback_data=Keyboards.CWL_BONUS_DISTRIBUTION_CALLBACK)],
             [InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")]
         ]
         return InlineKeyboardMarkup(keyboard)
@@ -325,8 +330,6 @@ class Keyboards:
         keyboard = [
             [InlineKeyboardButton("📊 Статистика атак", 
                                 callback_data=f"war_attacks:{clan_tag}:{war_end_time}")],
-            [InlineKeyboardButton("🚫 Нарушения", 
-                                callback_data=f"war_violations:{clan_tag}:{war_end_time}")],
             [InlineKeyboardButton("⬅️ К списку войн", 
                                 callback_data=f"{Keyboards.WAR_LIST_CALLBACK}:{clan_tag}:recent:1")]
         ]

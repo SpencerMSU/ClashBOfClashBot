@@ -7,10 +7,10 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 import json
 
-from database import DatabaseService
-from coc_api import CocApiClient, is_war_ended, is_war_in_preparation, is_cwl_active
-from models.war import WarToSave
-from config import config
+from src.services.database import DatabaseService
+from src.services.coc_api import CocApiClient, is_war_ended, is_war_in_preparation, is_cwl_active
+from src.models.war import WarToSave
+from config.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,12 @@ class WarArchiver:
     
     async def _archive_loop(self):
         """Основной цикл архивации"""
+        # При первом запуске проверяем журнал войн на наличие непроцессированных войн
+        try:
+            await self._check_war_log_for_past_wars()
+        except Exception as e:
+            logger.error(f"[Архиватор] Ошибка при проверке журнала войн: {e}")
+        
         while self.is_running:
             try:
                 await self._check_current_war()
@@ -71,6 +77,91 @@ class WarArchiver:
             except Exception as e:
                 logger.error(f"[Архиватор] Ошибка в фоновой задаче: {e}")
                 await asyncio.sleep(60)  # Ждем минуту перед повтором при ошибке
+    
+    async def _check_war_log_for_past_wars(self):
+        """Проверка журнала войн на наличие непроцессированных войн"""
+        logger.info(f"[Архиватор] Проверка журнала войн для клана {self.clan_tag}")
+        
+        try:
+            async with self.coc_client as client:
+                war_log = await client.get_clan_war_log(self.clan_tag)
+                
+                if not war_log or 'items' not in war_log:
+                    logger.warning(f"[Архиватор] Журнал войн недоступен для клана {self.clan_tag}")
+                    return
+                
+                wars = war_log.get('items', [])
+                logger.info(f"[Архиватор] Найдено {len(wars)} войн в журнале")
+                
+                # Обрабатываем войны из журнала (от новых к старым)
+                processed_count = 0
+                for war_entry in wars:
+                    # Проверяем, что война завершена
+                    if war_entry.get('result') not in ['win', 'lose', 'tie']:
+                        continue
+                    
+                    end_time = war_entry.get('endTime')
+                    if not end_time:
+                        continue
+                    
+                    # Проверяем, не сохранена ли уже эта война
+                    if await self.db_service.war_exists(end_time):
+                        continue
+                    
+                    # Получаем информацию о войне из журнала
+                    clan_data = war_entry.get('clan', {})
+                    opponent_data = war_entry.get('opponent', {})
+                    
+                    if not clan_data or not opponent_data:
+                        continue
+                    
+                    # Собираем информацию о войне
+                    opponent_name = opponent_data.get('name', 'Неизвестный противник')
+                    team_size = war_entry.get('teamSize', len(clan_data.get('members', [])))
+                    clan_stars = clan_data.get('stars', 0)
+                    opponent_stars = opponent_data.get('stars', 0)
+                    clan_destruction = clan_data.get('destructionPercentage', 0.0)
+                    opponent_destruction = opponent_data.get('destructionPercentage', 0.0)
+                    
+                    # Подсчет использованных атак и анализ атак
+                    clan_attacks_used, total_violations, attacks_by_member = self._analyze_attacks(clan_data)
+                    
+                    # Определение результата
+                    result = war_entry.get('result', self._determine_result(clan_stars, opponent_stars))
+                    
+                    # Проверяем, является ли война ЛВК (упрощенная проверка по журналу)
+                    # В журнале войн нет прямой информации о ЛВК, используем эвристику
+                    is_cwl_war = False  # В журнале обычно ЛВК войны не отображаются, но можем проверить
+                    
+                    # Создание объекта войны для сохранения
+                    war_to_save = WarToSave(
+                        end_time=end_time,
+                        opponent_name=opponent_name,
+                        team_size=team_size,
+                        clan_stars=clan_stars,
+                        opponent_stars=opponent_stars,
+                        clan_destruction=clan_destruction,
+                        opponent_destruction=opponent_destruction,
+                        clan_attacks_used=clan_attacks_used,
+                        result=result,
+                        is_cwl_war=is_cwl_war,
+                        total_violations=total_violations,
+                        attacks_by_member=attacks_by_member
+                    )
+                    
+                    # Сохранение в базу данных
+                    success = await self.db_service.save_war(war_to_save)
+                    if success:
+                        processed_count += 1
+                        logger.info(f"[Архиватор] Война против {opponent_name} (завершена {end_time}) добавлена из журнала")
+                
+                if processed_count > 0:
+                    logger.info(f"[Архиватор] Обработано {processed_count} войн из журнала")
+                else:
+                    logger.info(f"[Архиватор] Все войны из журнала уже обработаны")
+                    
+        except Exception as e:
+            logger.error(f"[Архиватор] Ошибка при обработке журнала войн: {e}")
     
     async def _check_current_war(self):
         """Проверка текущей войны"""

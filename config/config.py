@@ -5,7 +5,7 @@ import os
 from typing import Optional
 
 
-def _read_api_tokens(filename: str = 'api_tokens.txt') -> dict:
+def _read_api_tokens(filename: str = 'config/api_tokens.txt') -> dict:
     """Чтение API токенов из текстового файла"""
     tokens = {}
     

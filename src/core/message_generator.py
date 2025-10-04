@@ -9,15 +9,15 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 
-from database import DatabaseService
-from coc_api import CocApiClient, format_clan_tag, format_player_tag
-from keyboards import Keyboards, WarSort, MemberSort, MemberView
-from models.user import User
-from models.user_profile import UserProfile
-from user_state import UserState
-from models.subscription import Subscription
-from payment_service import YooKassaService
-from config import config
+from src.services.database import DatabaseService
+from src.services.coc_api import CocApiClient, format_clan_tag, format_player_tag
+from src.core.keyboards import Keyboards, WarSort, MemberSort, MemberView
+from src.models.user import User
+from src.models.user_profile import UserProfile
+from src.core.user_state import UserState
+from src.models.subscription import Subscription
+from src.services.payment_service import YooKassaService
+from config.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -984,7 +984,7 @@ class MessageGenerator:
                 keyboard = Keyboards.subscription_status(True)
             else:
                 # У пользователя нет активной подписки
-                from policy import get_policy_url
+                from src.utils.policy import get_policy_url
                 
                 message = (
                     f"💎 <b>Премиум подписки</b>\n\n"
@@ -1359,7 +1359,7 @@ class MessageGenerator:
                 
                 if not cwl_data:
                     # Возвращаемся к меню клана вместо показа ошибки
-                    from translations import translation_manager
+                    from src.utils.translations import translation_manager
                     message = translation_manager.get_text(update, 'cwl_not_participating', 
                                                          "❌ Клан не участвует в текущем сезоне ЛВК.")
                     
@@ -1574,6 +1574,209 @@ class MessageGenerator:
         
         return message
     
+    async def display_cwl_bonus_distribution(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Отображение распределения бонусов ЛВК"""
+        try:
+            clan_tag = context.user_data.get('inspecting_clan')
+            if not clan_tag:
+                await update.callback_query.edit_message_text("❌ Клан не выбран.")
+                return
+            
+            # Get clan info to determine league
+            async with self.coc_client as client:
+                clan_data = await client.get_clan_info(clan_tag)
+                
+                if not clan_data:
+                    await update.callback_query.edit_message_text("❌ Не удалось получить информацию о клане.")
+                    return
+                
+                clan_name = clan_data.get('name', 'Неизвестно')
+                
+                # Get clan league
+                war_league = clan_data.get('warLeague', {})
+                league_name = war_league.get('name', 'Неизвестно')
+                
+                # Determine number of bonus spots based on league
+                bonus_spots = self._get_bonus_spots_by_league(league_name)
+                
+                # Get current CWL season dates (approximate - from start of current month to now)
+                now = datetime.now()
+                # CWL typically starts around the 1st of the month
+                season_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                season_end = now
+                
+                # Get donation stats for the season
+                donation_stats = await self.db_service.get_cwl_season_donation_stats(
+                    season_start.isoformat(), season_end.isoformat()
+                )
+                
+                # Get attack stats for the season
+                attack_stats = await self.db_service.get_cwl_season_attack_stats(
+                    season_start.isoformat(), season_end.isoformat()
+                )
+                
+                # Get current clan members to map tags to names
+                members = clan_data.get('memberList', [])
+                member_map = {m.get('tag'): m.get('name') for m in members}
+                
+                # Calculate bonus distribution
+                distribution = self._calculate_bonus_distribution(
+                    donation_stats, attack_stats, member_map, bonus_spots
+                )
+                
+                # Format and display the message
+                message = self._format_cwl_bonus_distribution(
+                    clan_name, league_name, bonus_spots, distribution
+                )
+                
+                await update.callback_query.edit_message_text(
+                    message, parse_mode=ParseMode.MARKDOWN
+                )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при отображении распределения бонусов ЛВК: {e}")
+            await update.callback_query.edit_message_text(
+                "❌ Произошла ошибка при получении информации о распределении бонусов."
+            )
+    
+    def _get_bonus_spots_by_league(self, league_name: str) -> int:
+        """Определение количества бонусных мест по лиге"""
+        # Based on Clash of Clans CWL league bonus structure
+        league_bonuses = {
+            'Champion League I': 8,
+            'Champion League II': 7,
+            'Champion League III': 6,
+            'Master League I': 5,
+            'Master League II': 4,
+            'Master League III': 3,
+            'Crystal League I': 3,
+            'Crystal League II': 2,
+            'Crystal League III': 2,
+            'Gold League I': 2,
+            'Gold League II': 2,
+            'Gold League III': 2,
+            'Silver League I': 2,
+            'Silver League II': 2,
+            'Silver League III': 2,
+            'Bronze League I': 2,
+            'Bronze League II': 2,
+            'Bronze League III': 2,
+        }
+        return league_bonuses.get(league_name, 2)  # Default to 2 if unknown
+    
+    def _calculate_bonus_distribution(self, donation_stats: Dict[str, int], 
+                                     attack_stats: Dict[str, Dict], 
+                                     member_map: Dict[str, str],
+                                     bonus_spots: int) -> List[Dict]:
+        """Расчет распределения бонусов ЛВК"""
+        candidates = []
+        
+        # Combine all player data
+        all_player_tags = set(donation_stats.keys()) | set(attack_stats.keys())
+        
+        for player_tag in all_player_tags:
+            player_name = member_map.get(player_tag, 'Неизвестно')
+            donations = donation_stats.get(player_tag, 0)
+            attacks = attack_stats.get(player_tag, {
+                'cwl_attacks': 0,
+                'regular_attacks': 0,
+                'cwl_wars': 0,
+                'regular_wars': 0
+            })
+            
+            # Skip players who don't meet minimum regular war attacks (10)
+            if attacks['regular_attacks'] < 10:
+                continue
+            
+            candidates.append({
+                'player_tag': player_tag,
+                'player_name': player_name,
+                'donations': donations,
+                'cwl_attacks': attacks['cwl_attacks'],
+                'cwl_wars': attacks['cwl_wars'],
+                'regular_attacks': attacks['regular_attacks'],
+                'regular_wars': attacks['regular_wars']
+            })
+        
+        if not candidates:
+            return []
+        
+        # Sort to find top donator
+        sorted_by_donations = sorted(candidates, key=lambda x: x['donations'], reverse=True)
+        
+        # First spot always goes to top donator
+        distribution = []
+        if sorted_by_donations:
+            top_donator = sorted_by_donations[0]
+            distribution.append({
+                'rank': 1,
+                'player_name': top_donator['player_name'],
+                'reason': f"🎁 Топ донатов: {top_donator['donations']:,}",
+                'cwl_attacks': top_donator['cwl_attacks'],
+                'regular_attacks': top_donator['regular_attacks']
+            })
+            top_donator_tag = top_donator['player_tag']
+        else:
+            top_donator_tag = None
+        
+        # Sort remaining candidates by attack performance
+        # Priority: CWL attacks completed (7/7 > 6/7 > ...), then by regular war attacks
+        remaining_candidates = [c for c in candidates if c['player_tag'] != top_donator_tag]
+        
+        def attack_priority(candidate):
+            # Return tuple for sorting: (CWL attacks completed, regular attacks)
+            # Higher CWL attacks are better, then higher regular attacks
+            cwl_ratio = candidate['cwl_attacks']
+            return (cwl_ratio, candidate['regular_attacks'])
+        
+        sorted_by_attacks = sorted(remaining_candidates, key=attack_priority, reverse=True)
+        
+        # Fill remaining bonus spots
+        for i, candidate in enumerate(sorted_by_attacks[:bonus_spots - 1], 2):
+            distribution.append({
+                'rank': i,
+                'player_name': candidate['player_name'],
+                'reason': f"⚔️ ЛВК: {candidate['cwl_attacks']} атак, КВ: {candidate['regular_attacks']} атак",
+                'cwl_attacks': candidate['cwl_attacks'],
+                'regular_attacks': candidate['regular_attacks']
+            })
+        
+        return distribution
+    
+    def _format_cwl_bonus_distribution(self, clan_name: str, league_name: str, 
+                                      bonus_spots: int, distribution: List[Dict]) -> str:
+        """Форматирование информации о распределении бонусов ЛВК"""
+        message = f"💎 *Распределение бонусов ЛВК*\n\n"
+        message += f"🛡️ Клан: {clan_name}\n"
+        message += f"🏆 Лига: {league_name}\n"
+        message += f"📊 Доступно бонусов: {bonus_spots}\n\n"
+        
+        # Add description of the system
+        message += "📋 *Система распределения:*\n"
+        message += "1️⃣ Первое место - игрок с наибольшим количеством пожертвований за сезон\n"
+        message += "2️⃣ Остальные места - игроки с лучшими показателями атак в ЛВК\n"
+        message += "⚠️ Минимум 10 атак в обычных КВ за сезон для участия\n"
+        message += "🎯 Приоритет: больше атак ЛВК → больше атак КВ\n\n"
+        
+        if not distribution:
+            message += "📭 Нет данных о кандидатах на бонусы.\n"
+            message += "Возможные причины:\n"
+            message += "• Недостаточно данных за текущий сезон\n"
+            message += "• Никто не выполнил минимальные требования (10 атак КВ)\n"
+            return message
+        
+        message += "🎖️ *Распределение бонусных мест:*\n\n"
+        
+        for entry in distribution:
+            rank_emoji = {1: "🥇", 2: "🥈", 3: "🥉"}.get(entry['rank'], f"{entry['rank']}.")
+            message += f"{rank_emoji} {entry['player_name']}\n"
+            message += f"   {entry['reason']}\n\n"
+        
+        if len(distribution) < bonus_spots:
+            message += f"ℹ️ Осталось {bonus_spots - len(distribution)} свободных мест\n"
+        
+        return message
+    
     async def handle_premium_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка меню для премиум подписчиков"""
         chat_id = update.effective_chat.id
@@ -1686,7 +1889,7 @@ class MessageGenerator:
             check_interval_text = "каждые 1.5 минуты"
             
             # Проверяем статус отслеживания
-            from building_monitor import BuildingMonitor
+            from src.services.building_monitor import BuildingMonitor
             building_monitor = context.bot_data.get('building_monitor', None)
             is_active = False
             
@@ -1756,7 +1959,7 @@ class MessageGenerator:
                 )
                 return
             
-            from building_monitor import BuildingMonitor
+            from src.services.building_monitor import BuildingMonitor
             building_monitor = context.bot_data.get('building_monitor', None)
 
             if not building_monitor:
@@ -2174,6 +2377,127 @@ class MessageGenerator:
             logger.error(f"Ошибка при привязке клана: {e}")
             await update.message.reply_text("Произошла ошибка при привязке клана.")
     
+    async def handle_war_scan_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка нажатия кнопки запроса сканирования войн"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Проверяем, может ли пользователь сделать запрос (1 успешный запрос в день)
+            can_request = await self.db_service.can_request_war_scan(chat_id)
+            
+            if not can_request:
+                requests_today = await self.db_service.get_war_scan_requests_today(chat_id)
+                await update.message.reply_text(
+                    f"❌ *Лимит запросов исчерпан*\n\n"
+                    f"Вы уже сделали {requests_today} успешный запрос сегодня.\n"
+                    f"Каждый пользователь может делать максимум 1 успешный запрос в день.\n\n"
+                    f"⏰ Попробуйте снова завтра!",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+            
+            # Устанавливаем состояние ожидания тега клана
+            context.user_data['state'] = UserState.AWAITING_CLAN_TAG_FOR_WAR_SCAN
+            
+            await update.message.reply_text(
+                "📊 *Запрос на добавление истории войн клана*\n\n"
+                "Эта функция позволяет добавить все прошедшие войны клана в базу данных.\n\n"
+                "📝 Отправьте тег клана для сканирования.\n"
+                "Например: `#2PP` или `#ABC123DEF`\n\n"
+                "ℹ️ *Ограничения:*\n"
+                "• Максимум 1 успешный запрос в день\n"
+                "• Будут добавлены только новые войны\n"
+                "• Процесс может занять некоторое время",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        
+        except Exception as e:
+            logger.error(f"Ошибка при обработке кнопки запроса сканирования: {e}")
+            await update.message.reply_text("Произошла ошибка при обработке запроса.")
+    
+    async def handle_war_scan_request(self, update: Update, context: ContextTypes.DEFAULT_TYPE, clan_tag: str):
+        """Обработка запроса на сканирование войн клана"""
+        chat_id = update.effective_chat.id
+        
+        try:
+            # Проверяем лимит еще раз
+            can_request = await self.db_service.can_request_war_scan(chat_id)
+            
+            if not can_request:
+                await update.message.reply_text(
+                    "❌ Лимит запросов исчерпан. Попробуйте завтра."
+                )
+                return
+            
+            # Отправляем сообщение о начале обработки
+            processing_message = await update.message.reply_text(
+                f"⏳ *Начинаю сканирование клана {clan_tag}...*\n\n"
+                f"Это может занять некоторое время. Пожалуйста, подождите.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+            # Проверяем существование клана
+            async with self.coc_client as client:
+                clan_data = await client.get_clan_info(clan_tag)
+                
+                if not clan_data:
+                    await processing_message.edit_text(
+                        f"❌ Клан с тегом `{clan_tag}` не найден.\n"
+                        f"Проверьте правильность тега и попробуйте снова.",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                    # Сохраняем неудачный запрос
+                    await self.db_service.save_war_scan_request(chat_id, clan_tag, "failed", 0)
+                    return
+                
+                clan_name = clan_data.get('name', 'Неизвестный клан')
+            
+            # Импортируем ClanScanner и выполняем сканирование
+            from scanners.clan_scanner import ClanScanner
+            scanner = ClanScanner(self.db_service, self.coc_client)
+            
+            # Сканируем историю войн
+            wars_added = await scanner.scan_clan_wars_history(clan_tag)
+            
+            # Сохраняем успешный запрос
+            await self.db_service.save_war_scan_request(chat_id, clan_tag, "success", wars_added)
+            
+            # Отправляем результат
+            if wars_added > 0:
+                await processing_message.edit_text(
+                    f"✅ *Сканирование завершено успешно!*\n\n"
+                    f"🛡 Клан: {clan_name}\n"
+                    f"🏷 Тег: `{clan_tag}`\n"
+                    f"📊 Добавлено войн: {wars_added}\n\n"
+                    f"Теперь вы можете просмотреть историю войн этого клана через меню поиска кланов.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await processing_message.edit_text(
+                    f"✅ *Сканирование завершено*\n\n"
+                    f"🛡 Клан: {clan_name}\n"
+                    f"🏷 Тег: `{clan_tag}`\n"
+                    f"📊 Новых войн не найдено\n\n"
+                    f"Все войны этого клана уже есть в базе данных.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+        
+        except asyncio.TimeoutError:
+            logger.error(f"Таймаут при сканировании войн клана {clan_tag}")
+            await update.message.reply_text(
+                "⏱️ Превышено время ожидания при сканировании.\n"
+                "Попробуйте позже."
+            )
+            await self.db_service.save_war_scan_request(chat_id, clan_tag, "timeout", 0)
+        
+        except Exception as e:
+            logger.error(f"Ошибка при сканировании войн клана {clan_tag}: {e}")
+            await update.message.reply_text(
+                "❌ Произошла ошибка при сканировании войн клана.\n"
+                "Попробуйте позже."
+            )
+            await self.db_service.save_war_scan_request(chat_id, clan_tag, "error", 0)
+    
     async def handle_linked_clan_delete(self, update: Update, context: ContextTypes.DEFAULT_TYPE, slot_number: int):
         """Обработка удаления привязанного клана"""
         chat_id = update.effective_chat.id
@@ -2296,7 +2620,7 @@ class MessageGenerator:
     async def handle_building_detail_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, building_id: str, page: int = 1):
         """Обработка детальной информации о здании с пагинацией"""
         try:
-            from building_data import get_building_info, format_currency, format_time
+            from src.utils.building_data import get_building_info, format_currency, format_time
             
             building_info = get_building_info(building_id)
             
@@ -2483,7 +2807,7 @@ class MessageGenerator:
                 player_data = await client.get_player_info(player_tag)
                 
                 if not player_data:
-                    from translations import translation_manager
+                    from src.utils.translations import translation_manager
                     error_msg = translation_manager.get_text(update, 'player_not_found', "❌ Игрок не найден.")
                     await update.callback_query.edit_message_text(error_msg)
                     return
@@ -2509,9 +2833,18 @@ class MessageGenerator:
                 
         except Exception as e:
             logger.error(f"Ошибка при обработке достижений игрока {player_tag}: {e}")
-            from translations import translation_manager
-            error_msg = translation_manager.get_text(update, 'loading_error', "❌ Произошла ошибка при загрузке достижений.")
-            await update.callback_query.edit_message_text(error_msg)
+            from src.utils.translations import translation_manager
+            error_msg = translation_manager.get_text(update, 'loading_error', "❌ Произошла ошибка при загрузке данных.")
+            try:
+                await update.callback_query.edit_message_text(error_msg)
+            except Exception as edit_error:
+                logger.error(f"Ошибка при редактировании сообщения об ошибке достижений: {edit_error}")
+                # Fallback: try to send a new message if editing fails
+                if update.effective_chat:
+                    try:
+                        await update.effective_chat.send_message(error_msg)
+                    except Exception as send_error:
+                        logger.error(f"Не удалось отправить сообщение об ошибке достижений: {send_error}")
     
     def _format_achievements_page(self, update: Update, player_name: str, achievements: List[Dict], 
                                 page: int, sort_type: str) -> tuple:
@@ -2589,8 +2922,10 @@ class MessageGenerator:
                     
                 name = achievement.get('name', 'Неизвестно')
                 # Переводим название достижения
-                from translations import translation_manager
+                from src.utils.translations import translation_manager
                 translated_name = translation_manager.get_achievement_name(update, name)
+                # Получаем описание достижения
+                description = translation_manager.get_achievement_description(update, name)
                 
                 value = achievement.get('value', 0)
                 target = achievement.get('target', 0)
@@ -2623,6 +2958,8 @@ class MessageGenerator:
                     xp = 0
                 
                 message += f"{status} <b>{translated_name}</b>\n"
+                if description:
+                    message += f"   ℹ️ <i>{description}</i>\n"
                 message += f"   📊 {progress_bar} {progress_percent:.1f}%\n"
                 message += f"   🎯 {value:,}/{target:,}\n"
                 

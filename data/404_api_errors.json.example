@@ -1,0 +1,50 @@
+{
+  "scan_time": "2024-01-15T10:30:00.123456",
+  "total_errors": 3,
+  "errors_by_clan": {
+    "#CLAN001": [
+      {
+        "timestamp": "2024-01-15T10:25:00.000000",
+        "endpoint": "/clans/%23CLAN001/warlog",
+        "status_code": 404,
+        "error_message": "Resource not found"
+      }
+    ],
+    "#CLAN002": [
+      {
+        "timestamp": "2024-01-15T10:26:00.000000",
+        "endpoint": "/clans/%23CLAN002/warlog",
+        "status_code": 404,
+        "error_message": "Resource not found"
+      }
+    ],
+    "#CLAN003": [
+      {
+        "timestamp": "2024-01-15T10:27:00.000000",
+        "endpoint": "/clans/%23CLAN003/currentwar",
+        "status_code": 0,
+        "error_message": "Timeout error"
+      }
+    ]
+  },
+  "all_errors": [
+    {
+      "timestamp": "2024-01-15T10:25:00.000000",
+      "endpoint": "/clans/%23CLAN001/warlog",
+      "status_code": 404,
+      "error_message": "Resource not found"
+    },
+    {
+      "timestamp": "2024-01-15T10:26:00.000000",
+      "endpoint": "/clans/%23CLAN002/warlog",
+      "status_code": 404,
+      "error_message": "Resource not found"
+    },
+    {
+      "timestamp": "2024-01-15T10:27:00.000000",
+      "endpoint": "/clans/%23CLAN003/currentwar",
+      "status_code": 0,
+      "error_message": "Timeout error"
+    }
+  ]
+}

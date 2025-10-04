@@ -7,13 +7,13 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import json
 
-from models.user import User
-from models.user_profile import UserProfile
-from models.war import WarToSave, AttackData
-from models.subscription import Subscription
-from models.building import BuildingSnapshot, BuildingUpgrade, BuildingTracker
-from models.linked_clan import LinkedClan
-from config import config
+from src.models.user import User
+from src.models.user_profile import UserProfile
+from src.models.war import WarToSave, AttackData
+from src.models.subscription import Subscription
+from src.models.building import BuildingSnapshot, BuildingUpgrade, BuildingTracker
+from src.models.linked_clan import LinkedClan
+from config.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +171,26 @@ class DatabaseService:
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_linked_clans_telegram_id 
                 ON linked_clans(telegram_id)
+            """)
+            
+            # Создание таблицы запросов на сканирование войн
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS war_scan_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_id INTEGER NOT NULL,
+                    clan_tag TEXT NOT NULL,
+                    request_date TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    wars_added INTEGER DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(telegram_id, clan_tag, request_date)
+                )
+            """)
+            
+            # Создание индекса для запросов на сканирование
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_war_scan_requests_telegram_id_date 
+                ON war_scan_requests(telegram_id, request_date)
             """)
             
             await db.commit()
@@ -491,6 +511,90 @@ class DatabaseService:
                         return []
                 
                 return []
+    
+    async def get_cwl_season_donation_stats(self, season_start: str, season_end: str) -> Dict[str, int]:
+        """Получение статистики донатов игроков за сезон ЛВК"""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Get snapshots at the start and end of the season
+            async with db.execute("""
+                SELECT player_tag, donations, snapshot_time
+                FROM player_stats_snapshots
+                WHERE snapshot_time >= ? AND snapshot_time <= ?
+                ORDER BY player_tag, snapshot_time
+            """, (season_start, season_end)) as cursor:
+                rows = await cursor.fetchall()
+            
+            # Calculate donation difference for each player
+            player_donations = {}
+            player_snapshots = {}
+            
+            for row in rows:
+                player_tag = row[0]
+                donations = row[1]
+                snapshot_time = row[2]
+                
+                if player_tag not in player_snapshots:
+                    player_snapshots[player_tag] = []
+                player_snapshots[player_tag].append((snapshot_time, donations))
+            
+            # Calculate difference between first and last snapshot
+            for player_tag, snapshots in player_snapshots.items():
+                if len(snapshots) >= 2:
+                    first_donations = snapshots[0][1]
+                    last_donations = snapshots[-1][1]
+                    player_donations[player_tag] = max(0, last_donations - first_donations)
+                elif len(snapshots) == 1:
+                    player_donations[player_tag] = snapshots[0][1]
+            
+            return player_donations
+    
+    async def get_cwl_season_attack_stats(self, season_start: str, season_end: str) -> Dict[str, Dict]:
+        """Получение статистики атак игроков за сезон ЛВК"""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Get all wars in the season
+            async with db.execute("""
+                SELECT end_time, is_cwl_war
+                FROM wars
+                WHERE end_time >= ? AND end_time <= ?
+                ORDER BY end_time
+            """, (season_start, season_end)) as cursor:
+                war_rows = await cursor.fetchall()
+            
+            # Get all attacks for these wars
+            player_stats = {}
+            
+            for war_row in war_rows:
+                war_end_time = war_row[0]
+                is_cwl = bool(war_row[1])
+                
+                async with db.execute("""
+                    SELECT attacker_tag, COUNT(*) as attack_count
+                    FROM attacks
+                    WHERE war_id = ?
+                    GROUP BY attacker_tag
+                """, (war_end_time,)) as cursor:
+                    attack_rows = await cursor.fetchall()
+                
+                for attack_row in attack_rows:
+                    player_tag = attack_row[0]
+                    attack_count = attack_row[1]
+                    
+                    if player_tag not in player_stats:
+                        player_stats[player_tag] = {
+                            'cwl_attacks': 0,
+                            'regular_attacks': 0,
+                            'cwl_wars': 0,
+                            'regular_wars': 0
+                        }
+                    
+                    if is_cwl:
+                        player_stats[player_tag]['cwl_attacks'] += attack_count
+                        player_stats[player_tag]['cwl_wars'] += 1
+                    else:
+                        player_stats[player_tag]['regular_attacks'] += attack_count
+                        player_stats[player_tag]['regular_wars'] += 1
+            
+            return player_stats
     
     async def get_war_details(self, end_time: str) -> Optional[Dict]:
         """Получение детальной информации о войне"""
@@ -922,3 +1026,55 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Ошибка при получении лимита привязанных кланов: {e}")
             return 1
+    
+    # Методы для работы с запросами на сканирование войн
+    async def can_request_war_scan(self, telegram_id: int) -> bool:
+        """Проверка, может ли пользователь запросить сканирование войн (1 успешный запрос в день)"""
+        try:
+            today = datetime.now().date().isoformat()
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM war_scan_requests "
+                    "WHERE telegram_id = ? AND request_date = ? AND status = 'success'",
+                    (telegram_id, today)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    count = row[0] if row else 0
+                    return count == 0
+        except Exception as e:
+            logger.error(f"Ошибка при проверке лимита запросов сканирования: {e}")
+            return False
+    
+    async def save_war_scan_request(self, telegram_id: int, clan_tag: str, status: str, wars_added: int = 0) -> bool:
+        """Сохранение запроса на сканирование войн"""
+        try:
+            today = datetime.now().date().isoformat()
+            created_at = datetime.now().isoformat()
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    "INSERT INTO war_scan_requests "
+                    "(telegram_id, clan_tag, request_date, status, wars_added, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (telegram_id, clan_tag, today, status, wars_added, created_at)
+                )
+                await db.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении запроса сканирования: {e}")
+            return False
+    
+    async def get_war_scan_requests_today(self, telegram_id: int) -> int:
+        """Получение количества успешных запросов на сканирование за сегодня"""
+        try:
+            today = datetime.now().date().isoformat()
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM war_scan_requests "
+                    "WHERE telegram_id = ? AND request_date = ? AND status = 'success'",
+                    (telegram_id, today)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    return row[0] if row else 0
+        except Exception as e:
+            logger.error(f"Ошибка при получении количества запросов: {e}")
+            return 0
