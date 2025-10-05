@@ -73,22 +73,29 @@ class ClanScanner:
     async def _scan_loop(self):
         """Основной цикл сканирования"""
         # Первое сканирование сразу после запуска
+        logger.info("[Сканер кланов] Запуск первого сканирования...")
         try:
             await self._scan_clans()
+            logger.info("[Сканер кланов] Первое сканирование завершено успешно")
         except Exception as e:
-            logger.error(f"[Сканер кланов] Ошибка при первом сканировании: {e}")
+            logger.error(f"[Сканер кланов] Ошибка при первом сканировании: {e}", exc_info=True)
         
         while self.is_running:
             try:
                 # Ждем интервал перед следующим сканированием
+                logger.debug(f"[Сканер кланов] Ожидание {self.scan_interval} секунд до следующего сканирования...")
                 await asyncio.sleep(self.scan_interval)
                 
+                logger.info("[Сканер кланов] Начало очередного сканирования...")
                 await self._scan_clans()
+                logger.info("[Сканер кланов] Очередное сканирование завершено успешно")
                 
             except asyncio.CancelledError:
+                logger.info("[Сканер кланов] Цикл сканирования отменен")
                 break
             except Exception as e:
-                logger.error(f"[Сканер кланов] Ошибка в цикле сканирования: {e}")
+                logger.error(f"[Сканер кланов] Ошибка в цикле сканирования: {e}", exc_info=True)
+                logger.info("[Сканер кланов] Ожидание 60 секунд перед повтором после ошибки...")
                 await asyncio.sleep(60)  # Ждем минуту перед повтором при ошибке
     
     async def _scan_clans(self):
@@ -96,64 +103,93 @@ class ClanScanner:
         logger.info("[Сканер кланов] Начало сканирования")
         
         # Проверяем доступность API перед началом
+        logger.debug("[Сканер кланов] Проверка доступности API...")
         api_available = await self._check_api_availability()
         if not api_available:
             logger.warning("[Сканер кланов] API недоступен, пропускаем сканирование")
             return
         
+        logger.info("[Сканер кланов] API доступен, начинаем сканирование")
         scanned_count = 0
         wars_found = 0
+        errors_count = 0
         
         try:
+            logger.info(f"[Сканер кланов] Сканирование {len(self.location_ids)} локаций...")
             # Сканируем кланы по локациям
-            for location_id in self.location_ids:
+            for idx, location_id in enumerate(self.location_ids, 1):
                 try:
+                    logger.debug(f"[Сканер кланов] Запрос кланов из локации {location_id} ({idx}/{len(self.location_ids)})...")
                     clans = await self._get_top_clans_by_location(location_id)
                     if not clans:
+                        logger.debug(f"[Сканер кланов] Локация {location_id}: кланы не найдены")
                         continue
                     
-                    logger.info(f"[Сканер кланов] Найдено {len(clans)} кланов в локации {location_id}")
+                    logger.info(f"[Сканер кланов] Локация {location_id}: найдено {len(clans)} кланов")
                     
                     for clan in clans:
                         clan_tag = clan.get('tag')
                         if not clan_tag:
+                            logger.debug("[Сканер кланов] Пропуск клана без тега")
                             continue
                         
                         # Проверяем, не сканировали ли мы этот клан недавно
                         if not self._should_scan_clan(clan_tag):
+                            logger.debug(f"[Сканер кланов] Клан {clan_tag} был недавно отсканирован, пропускаем")
                             continue
                         
                         # Сканируем клан на наличие войн
-                        war_saved = await self._scan_clan_war(clan_tag)
-                        if war_saved:
-                            wars_found += 1
-                        
-                        scanned_count += 1
-                        
-                        # Обновляем кэш
-                        self.scanned_clans[clan_tag] = datetime.now()
-                        
-                        # Небольшая задержка между запросами
-                        await asyncio.sleep(1)
+                        try:
+                            war_saved = await self._scan_clan_war(clan_tag)
+                            if war_saved:
+                                wars_found += 1
+                                logger.debug(f"[Сканер кланов] Клан {clan_tag}: новая война сохранена")
+                            
+                            scanned_count += 1
+                            
+                            # Обновляем кэш
+                            self.scanned_clans[clan_tag] = datetime.now()
+                            
+                            # Небольшая задержка между запросами
+                            await asyncio.sleep(1)
+                        except Exception as e:
+                            errors_count += 1
+                            logger.debug(f"[Сканер кланов] Ошибка при сканировании клана {clan_tag}: {e}")
+                            continue
                     
+                except asyncio.CancelledError:
+                    logger.warning("[Сканер кланов] Сканирование отменено")
+                    raise
                 except Exception as e:
-                    logger.debug(f"[Сканер кланов] Ошибка при сканировании локации {location_id}: {e}")
+                    errors_count += 1
+                    logger.warning(f"[Сканер кланов] Ошибка при сканировании локации {location_id}: {e}", exc_info=True)
                     continue
             
-            logger.info(f"[Сканер кланов] Завершено. Отсканировано {scanned_count} кланов, найдено {wars_found} новых войн")
+            logger.info(f"[Сканер кланов] ✅ Сканирование завершено успешно!")
+            logger.info(f"[Сканер кланов] Статистика: отсканировано {scanned_count} кланов, найдено {wars_found} новых войн, ошибок {errors_count}")
             
+        except asyncio.CancelledError:
+            logger.warning("[Сканер кланов] Сканирование отменено пользователем")
+            raise
         except Exception as e:
-            logger.error(f"[Сканер кланов] Ошибка при сканировании: {e}")
+            logger.error(f"[Сканер кланов] ❌ Критическая ошибка при сканировании: {e}", exc_info=True)
     
     async def _check_api_availability(self) -> bool:
         """Проверка доступности COC API"""
         try:
+            logger.debug("[Сканер кланов] Проверка доступности API...")
             async with self.coc_client as client:
                 # Пробуем сделать простой запрос для проверки API
                 endpoint = "/locations/32000007/rankings/clans?limit=1"
                 data = await client._make_request(endpoint)
-                return data is not None
-        except Exception:
+                available = data is not None
+                if available:
+                    logger.debug("[Сканер кланов] API доступен")
+                else:
+                    logger.warning("[Сканер кланов] API вернул пустой ответ")
+                return available
+        except Exception as e:
+            logger.warning(f"[Сканер кланов] API недоступен: {e}")
             return False
     
     def _should_scan_clan(self, clan_tag: str) -> bool:
@@ -172,10 +208,15 @@ class ClanScanner:
             async with self.coc_client as client:
                 # Используем внутренний метод для получения рейтинга кланов
                 endpoint = f"/locations/{location_id}/rankings/clans?limit={limit}"
+                logger.debug(f"[Сканер кланов] Запрос к API: {endpoint}")
                 data = await client._make_request(endpoint)
                 
                 if data and 'items' in data:
-                    return data['items']
+                    clans = data['items']
+                    logger.debug(f"[Сканер кланов] Получено {len(clans)} кланов из локации {location_id}")
+                    return clans
+                else:
+                    logger.debug(f"[Сканер кланов] Пустой ответ от API для локации {location_id}")
                 
         except Exception as e:
             # Логируем только на уровне DEBUG, чтобы не засорять логи при проблемах с API
@@ -186,26 +227,33 @@ class ClanScanner:
     async def _scan_clan_war(self, clan_tag: str) -> bool:
         """Сканирование войны клана"""
         try:
+            logger.debug(f"[Сканер кланов] Получение текущей войны для клана {clan_tag}...")
             async with self.coc_client as client:
                 war_data = await client.get_clan_current_war(clan_tag)
                 
                 if not war_data:
+                    logger.debug(f"[Сканер кланов] Клан {clan_tag}: данные о войне отсутствуют")
                     return False
                 
                 war_state = war_data.get('state', '')
+                logger.debug(f"[Сканер кланов] Клан {clan_tag}: состояние войны = {war_state}")
                 
                 # Обрабатываем только завершенные войны
                 if war_state != 'warEnded':
+                    logger.debug(f"[Сканер кланов] Клан {clan_tag}: война не завершена, пропускаем")
                     return False
                 
                 end_time = war_data.get('endTime')
                 if not end_time:
+                    logger.debug(f"[Сканер кланов] Клан {clan_tag}: отсутствует endTime")
                     return False
                 
                 # Проверяем, не сохранена ли уже эта война
                 if await self.db_service.war_exists(end_time):
+                    logger.debug(f"[Сканер кланов] Клан {clan_tag}: война уже существует в БД")
                     return False
                 
+                logger.debug(f"[Сканер кланов] Клан {clan_tag}: анализ и сохранение новой войны...")
                 # Анализируем и сохраняем войну
                 await self._analyze_and_save_war(war_data, clan_tag)
                 
@@ -230,6 +278,8 @@ class ClanScanner:
             opponent_stars = opponent_data.get('stars', 0)
             clan_destruction = clan_data.get('destructionPercentage', 0.0)
             opponent_destruction = opponent_data.get('destructionPercentage', 0.0)
+            
+            logger.debug(f"[Сканер кланов] Анализ войны: размер {team_size}, звезды {clan_stars}:{opponent_stars}")
             
             # Подсчет использованных атак
             clan_attacks_used, total_violations, attacks_by_member = self._analyze_attacks(clan_data)
@@ -257,14 +307,17 @@ class ClanScanner:
             )
             
             # Сохранение в базу данных
+            logger.debug(f"[Сканер кланов] Сохранение войны в БД...")
             success = await self.db_service.save_war(war_to_save)
             
             if success:
                 clan_name = clan_data.get('name', clan_tag)
-                logger.info(f"[Сканер кланов] Война сохранена: {clan_name} vs {opponent_name} (завершена {end_time})")
+                logger.info(f"[Сканер кланов] ✅ Война сохранена: {clan_name} vs {opponent_name} (результат: {result}, завершена {end_time})")
+            else:
+                logger.warning(f"[Сканер кланов] ❌ Не удалось сохранить войну против {opponent_name}")
             
         except Exception as e:
-            logger.error(f"[Сканер кланов] Ошибка при анализе и сохранении войны: {e}")
+            logger.error(f"[Сканер кланов] Ошибка при анализе и сохранении войны: {e}", exc_info=True)
     
     def _analyze_attacks(self, clan_data: Dict[Any, Any]) -> tuple:
         """Анализ атак клана"""
