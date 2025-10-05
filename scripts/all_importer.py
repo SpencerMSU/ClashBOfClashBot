@@ -287,53 +287,70 @@ class UltraClanScanner:
         
         self.start_time = datetime.now()
         
-        logger.info("⚡ Инициализация высокопроизводительной системы...")
-        await self._init_high_performance_system()
-        
-        logger.info("💾 Инициализация базы данных...")
-        
-        # Проверка доступности базы данных
         try:
-            await self.db_service.init_db()
-            logger.info("✅ База данных инициализирована успешно")
+            logger.info("⚡ Инициализация высокопроизводительной системы...")
+            await self._init_high_performance_system()
+            logger.info("✅ Высокопроизводительная система инициализирована")
             
-            # COOLDOWN 5 секунд после инициализации БД для стабильности
-            logger.info("⏳ Пауза 5 секунд для стабилизации системы...")
-            await asyncio.sleep(5)
-            logger.info("🚀 Система готова к работе!")
+            logger.info("💾 Инициализация базы данных...")
             
+            # Проверка доступности базы данных
+            try:
+                await self.db_service.init_db()
+                logger.info("✅ База данных инициализирована успешно")
+                
+                # COOLDOWN 5 секунд после инициализации БД для стабильности
+                logger.info("⏳ Пауза 5 секунд для стабилизации системы...")
+                await asyncio.sleep(5)
+                logger.info("🚀 Система готова к работе!")
+                
+            except Exception as e:
+                if "database is locked" in str(e).lower():
+                    logger.error("❌ База данных заблокирована другим процессом!")
+                    logger.error("💡 Рекомендации:")
+                    logger.error("   1. Остановите основной бот: pkill -f main.py")
+                    logger.error("   2. Или запустите: ./force_stop_all.sh")
+                    logger.error("   3. Затем повторите запуск Ultra Scanner")
+                    sys.exit(1)
+                else:
+                    logger.error(f"❌ Ошибка инициализации БД: {e}", exc_info=True)
+                    sys.exit(1)
+            
+            logger.info(f"🌍 Будет просканировано {len(self.location_ids)} локаций")
+            logger.info(f"⚡ Максимальная параллельность: {self.max_concurrent_requests} запросов")
+            logger.info(f"🚄 Скорость: {self.requests_per_second} запросов/сек")
+            logger.info("🎯 ЦЕЛЬ: НАЙТИ И ИМПОРТИРОВАТЬ ВСЕ ВОЙНЫ ВСЕХ КЛАНОВ")
+            logger.info("🚀" * 40)
+            
+            try:
+                # Параллельное сканирование всех локаций
+                logger.info("🔄 Начинаем параллельное сканирование всех локаций...")
+                await self._ultra_parallel_scan()
+                logger.info("✅ Параллельное сканирование завершено успешно!")
+                
+                # Отправка уведомления в бота после завершения
+                logger.info("📱 Отправка уведомлений о завершении...")
+                await self._send_completion_notification()
+                logger.info("✅ Уведомления отправлены")
+                
+            except Exception as e:
+                logger.error(f"💥 Критическая ошибка во время сканирования: {e}", exc_info=True)
+                raise
+                
+        except KeyboardInterrupt:
+            logger.warning("⏹️ Сканирование прервано пользователем")
+            raise
         except Exception as e:
-            if "database is locked" in str(e).lower():
-                logger.error("❌ База данных заблокирована другим процессом!")
-                logger.error("💡 Рекомендации:")
-                logger.error("   1. Остановите основной бот: pkill -f main.py")
-                logger.error("   2. Или запустите: ./force_stop_all.sh")
-                logger.error("   3. Затем повторите запуск Ultra Scanner")
-                sys.exit(1)
-            else:
-                logger.error(f"❌ Ошибка инициализации БД: {e}")
-                sys.exit(1)
-        
-        logger.info(f"🌍 Будет просканировано {len(self.location_ids)} локаций")
-        logger.info(f"⚡ Максимальная параллельность: {self.max_concurrent_requests} запросов")
-        logger.info(f"🚄 Скорость: {self.requests_per_second} запросов/сек")
-        logger.info("🎯 ЦЕЛЬ: НАЙТИ И ИМПОРТИРОВАТЬ ВСЕ ВОЙНЫ ВСЕХ КЛАНОВ")
-        logger.info("🚀" * 40)
-        
-        try:
-            # Параллельное сканирование всех локаций
-            await self._ultra_parallel_scan()
-            
-            # Отправка уведомления в бота после завершения
-            await self._send_completion_notification()
-            
-        except Exception as e:
-            logger.error(f"💥 Критическая ошибка: {e}", exc_info=True)
+            logger.error(f"💥 Критическая ошибка в главной функции: {e}", exc_info=True)
+            raise
         finally:
+            logger.info("🧹 Очистка ресурсов...")
             await self._cleanup()
+            logger.info("✅ Ресурсы очищены")
         
         # Итоговая статистика
         self._print_final_stats()
+        logger.info("✅ УЛЬТРА СКАНЕР ЗАВЕРШИЛ РАБОТУ УСПЕШНО!")
     
     async def _init_high_performance_system(self):
         """Инициализация высокопроизводительной системы с ограничениями"""
@@ -363,30 +380,43 @@ class UltraClanScanner:
     async def _ultra_parallel_scan(self):
         """УЛЬТРА параллельное сканирование всех локаций"""
         logger.info("⚡ Начинаем УЛЬТРА параллельное сканирование...")
+        logger.info(f"📊 Всего локаций для сканирования: {len(self.location_ids)}")
         
         # Создаем задачи для всех локаций параллельно
         tasks = []
+        logger.info("🔄 Создание задач для всех локаций...")
         for location_id in self.location_ids:
-            task = asyncio.create_task(self._scan_location_ultra(location_id))
-            tasks.append(task)
+            try:
+                task = asyncio.create_task(self._scan_location_ultra(location_id))
+                tasks.append(task)
+            except Exception as e:
+                logger.error(f"💥 Ошибка при создании задачи для локации {location_id}: {e}", exc_info=True)
+                self.errors_count += 1
+        
+        logger.info(f"✅ Создано {len(tasks)} задач. Начинаем параллельное выполнение...")
         
         # Выполняем все задачи параллельно с прогрессом
         completed = 0
+        failed = 0
         for task in asyncio.as_completed(tasks):
             try:
                 await task
                 completed += 1
-                logger.info(f"📍 Завершено локаций: {completed}/{len(self.location_ids)}")
+                if completed % 5 == 0 or completed == len(tasks):
+                    logger.info(f"📍 Прогресс: {completed}/{len(tasks)} локаций завершено ({failed} с ошибками)")
                 
                 # Периодическая очистка памяти каждые 10 локаций
                 if completed % 10 == 0:
                     import gc
                     gc.collect()
-                    logger.debug(f"🧹 Очистка памяти выполнена ({completed} локаций)")
+                    logger.info(f"🧹 Очистка памяти выполнена (завершено {completed} локаций)")
                     
             except Exception as e:
-                logger.error(f"💥 Ошибка при сканировании локации: {e}")
+                failed += 1
+                logger.error(f"💥 Ошибка при сканировании локации: {e}", exc_info=True)
                 self.errors_count += 1
+        
+        logger.info(f"✅ Параллельное сканирование завершено: {completed} успешно, {failed} с ошибками")
     
     async def _scan_location_ultra(self, location_id: int):
         """УЛЬТРА сканирование одной локации"""
@@ -402,16 +432,18 @@ class UltraClanScanner:
                 f"/locations/{location_id}/rankings/players", 
             ]
             
+            logger.debug(f"📡 Локация {location_id}: начинаем опрос API endpoints...")
             for endpoint in endpoints_to_try:
                 try:
                     clans = await self._get_all_clans_from_endpoint(endpoint, location_id)
                     if clans:
                         all_clans.extend(clans)
-                        logger.info(f"📊 Endpoint {endpoint}: +{len(clans)} кланов")
+                        logger.info(f"📊 Локация {location_id} - Endpoint {endpoint}: +{len(clans)} кланов")
                 except Exception as e:
-                    logger.debug(f"⚠️ Endpoint {endpoint} недоступен: {e}")
+                    logger.warning(f"⚠️ Локация {location_id} - Endpoint {endpoint} недоступен: {e}")
             
             # Удаляем дубликаты
+            logger.debug(f"🔄 Локация {location_id}: удаление дубликатов из {len(all_clans)} кланов...")
             unique_clans = {}
             for clan in all_clans:
                 clan_tag = clan.get('tag')
@@ -422,41 +454,51 @@ class UltraClanScanner:
             self.total_clans_found += len(all_clans)
             
             if not all_clans:
-                logger.debug(f"❌ Локация {location_id}: кланы не найдены")
+                logger.info(f"❌ Локация {location_id}: кланы не найдены (это нормально для некоторых локаций)")
                 return
             
-            logger.info(f"✅ Локация {location_id}: найдено {len(all_clans)} уникальных кланов")
+            logger.info(f"✅ Локация {location_id}: найдено {len(all_clans)} уникальных кланов. Начинаем обработку...")
             
             # ОПТИМИЗИРОВАННАЯ параллельная обработка кланов
             start_time = time.time()
             processed_count = 0
+            failed_count = 0
             
             # Создаем семафор для ограничения одновременных операций с кланами
             clan_semaphore = asyncio.Semaphore(15)  # Уменьшено для стабильности
             
             async def process_clan_with_semaphore(clan):
-                nonlocal processed_count
+                nonlocal processed_count, failed_count
                 clan_tag = clan.get('tag')
                 if clan_tag and clan_tag not in self.processed_clans:
                     async with clan_semaphore:
-                        await self._process_clan_ultra(clan_tag)
-                        processed_count += 1
-                        
-                        # Прогресс каждые 50 кланов
-                        if processed_count % 50 == 0:
-                            elapsed = time.time() - start_time
-                            rate = processed_count / elapsed if elapsed > 0 else 0
-                            logger.info(f"📊 Локация {location_id}: обработано {processed_count}/{len(all_clans)} кланов ({rate:.1f}/сек)")
+                        try:
+                            await self._process_clan_ultra(clan_tag)
+                            processed_count += 1
+                            
+                            # Прогресс каждые 50 кланов
+                            if processed_count % 50 == 0:
+                                elapsed = time.time() - start_time
+                                rate = processed_count / elapsed if elapsed > 0 else 0
+                                logger.info(f"📊 Локация {location_id}: обработано {processed_count}/{len(all_clans)} кланов ({rate:.1f}/сек, ошибок: {failed_count})")
+                        except Exception as e:
+                            failed_count += 1
+                            logger.debug(f"⚠️ Ошибка обработки клана {clan_tag}: {e}")
             
             # Обрабатываем всех кланов с контролируемой параллельностью
+            logger.debug(f"🚀 Локация {location_id}: создание {len(all_clans)} задач обработки...")
             clan_tasks = [process_clan_with_semaphore(clan) for clan in all_clans]
+            logger.debug(f"⏳ Локация {location_id}: ожидание завершения всех задач...")
             await asyncio.gather(*clan_tasks, return_exceptions=True)
             
             elapsed = time.time() - start_time
-            logger.info(f"🎯 Локация {location_id}: обработка завершена за {elapsed:.1f}с ({processed_count} кланов)")
+            logger.info(f"🎯 Локация {location_id}: обработка завершена за {elapsed:.1f}с ({processed_count} успешно, {failed_count} ошибок)")
             
+        except asyncio.CancelledError:
+            logger.warning(f"⏹️ Локация {location_id}: сканирование отменено")
+            raise
         except Exception as e:
-            logger.error(f"💥 Ошибка при сканировании локации {location_id}: {e}")
+            logger.error(f"💥 Критическая ошибка при сканировании локации {location_id}: {e}", exc_info=True)
             self.errors_count += 1
     
     async def _get_all_clans_from_endpoint(self, endpoint: str, location_id: int) -> List[Dict[str, Any]]:
@@ -464,6 +506,7 @@ class UltraClanScanner:
         all_items = []
         
         try:
+            logger.debug(f"🌐 Локация {location_id}: запрос к endpoint {endpoint}...")
             # Пробуем получить максимальное количество данных
             limits_to_try = [1000, 500, 200]  # Разные лимиты для максимального охвата
             
@@ -488,25 +531,35 @@ class UltraClanScanner:
                                             if clan and clan.get('tag'):
                                                 clans.append(clan)
                                         all_items.extend(clans)
+                                        logger.debug(f"✅ {endpoint} (limit={limit}): извлечено {len(clans)} кланов из {len(items)} игроков")
                                     else:
                                         all_items.extend(items)
+                                        logger.debug(f"✅ {endpoint} (limit={limit}): получено {len(items)} элементов")
                                     
-                                    logger.debug(f"📈 {endpoint} (limit={limit}): +{len(items)} элементов")
                                     break  # Успешно получили данные
+                                else:
+                                    logger.debug(f"⚠️ {endpoint} (limit={limit}): пустой ответ")
                                     
                             elif response.status == 403:
-                                logger.debug(f"🔒 {endpoint}: доступ запрещен")
+                                logger.debug(f"🔒 {endpoint}: доступ запрещен (403)")
+                                break
+                            elif response.status == 404:
+                                logger.debug(f"❌ {endpoint}: не найден (404)")
                                 break
                             else:
-                                logger.debug(f"⚠️ {endpoint}: статус {response.status}")
+                                logger.warning(f"⚠️ {endpoint}: неожиданный статус {response.status}")
                                 
+                except asyncio.TimeoutError:
+                    logger.warning(f"⏱️ Таймаут при запросе {endpoint} (limit={limit})")
+                    continue
                 except Exception as e:
-                    logger.debug(f"⚠️ Ошибка limit={limit}: {e}")
+                    logger.debug(f"⚠️ Ошибка запроса {endpoint} (limit={limit}): {e}")
                     continue
                     
         except Exception as e:
-            logger.debug(f"💥 Ошибка endpoint {endpoint}: {e}")
+            logger.error(f"💥 Критическая ошибка endpoint {endpoint}: {e}", exc_info=True)
         
+        logger.debug(f"📊 Endpoint {endpoint}: всего получено {len(all_items)} элементов")
         return all_items
     
     async def _process_clan_ultra(self, clan_tag: str):
@@ -524,10 +577,13 @@ class UltraClanScanner:
                 # Получаем журнал войн клана
                 url = f"{config.COC_API_BASE_URL}/clans/{quote(clan_tag)}/warlog"
                 
+                logger.debug(f"🔍 Запрос журнала войн для клана {clan_tag}...")
                 async with self.session.get(url) as response:
                     if response.status != 200:
                         if response.status == 403:
                             logger.debug(f"🔒 Клан {clan_tag}: журнал приватный")
+                        elif response.status == 404:
+                            logger.debug(f"❌ Клан {clan_tag}: не найден")
                         else:
                             logger.debug(f"⚠️ Клан {clan_tag}: статус {response.status}")
                         return
@@ -536,21 +592,33 @@ class UltraClanScanner:
                     wars = data.get('items', [])
                     
                     if not wars:
+                        logger.debug(f"📭 Клан {clan_tag}: журнал войн пуст")
                         return
+                    
+                    logger.debug(f"📜 Клан {clan_tag}: найдено {len(wars)} войн в журнале")
                     
                     # ОПТИМИЗИРОВАННАЯ обработка войн (без лишних gather)
                     imported_count = 0
+                    skipped_count = 0
                     for war_entry in wars:
-                        if war_entry.get('result') in ['win', 'lose', 'tie']:
-                            success = await self._import_war_ultra(war_entry)
-                            if success:
-                                imported_count += 1
+                        try:
+                            if war_entry.get('result') in ['win', 'lose', 'tie']:
+                                success = await self._import_war_ultra(war_entry)
+                                if success:
+                                    imported_count += 1
+                                else:
+                                    skipped_count += 1
+                        except Exception as e:
+                            logger.debug(f"⚠️ Ошибка импорта войны для клана {clan_tag}: {e}")
                     
                     if imported_count > 0:
-                        logger.debug(f"⚡ Клан {clan_tag}: импортировано {imported_count} войн")
+                        logger.debug(f"⚡ Клан {clan_tag}: импортировано {imported_count} войн (пропущено {skipped_count})")
         
+        except asyncio.TimeoutError:
+            logger.warning(f"⏱️ Таймаут при обработке клана {clan_tag}")
+            self.errors_count += 1
         except Exception as e:
-            logger.debug(f"💥 Ошибка обработки клана {clan_tag}: {e}")
+            logger.error(f"💥 Ошибка обработки клана {clan_tag}: {e}", exc_info=True)
             self.errors_count += 1
     
     async def _import_war_ultra(self, war_entry: Dict[str, Any]) -> bool:
@@ -558,6 +626,7 @@ class UltraClanScanner:
         try:
             end_time = war_entry.get('endTime', '')
             if not end_time:
+                logger.debug("⚠️ Война пропущена: отсутствует endTime")
                 return False
             
             # Быстрая проверка существования войны
@@ -595,13 +664,15 @@ class UltraClanScanner:
             
             if success:
                 self.total_wars_imported += 1
+                logger.debug(f"✅ Война сохранена: {opponent_name} ({end_time})")
                 return True
             else:
                 self.errors_count += 1
+                logger.debug(f"❌ Не удалось сохранить войну: {opponent_name} ({end_time})")
                 return False
                 
         except Exception as e:
-            logger.debug(f"💥 Ошибка импорта войны: {e}")
+            logger.error(f"💥 Ошибка импорта войны: {e}", exc_info=True)
             self.errors_count += 1
             return False
     
@@ -631,7 +702,7 @@ class UltraClanScanner:
     async def _send_completion_notification(self):
         """Отправка уведомления в бота о завершении импорта"""
         try:
-            logger.info("📱 Отправляем уведомление о завершении импорта...")
+            logger.info("📱 Подготовка уведомления о завершении импорта...")
             
             # Создаем сообщение с результатами
             duration = datetime.now() - self.start_time
@@ -648,11 +719,14 @@ class UltraClanScanner:
                 f"🚀 Ваша база данных пополнена МИЛЛИОНАМИ войн!"
             )
             
+            logger.info(f"📝 Сообщение подготовлено: {len(message)} символов")
+            
             # Отправляем уведомление всем пользователям через систему бота
             await self._notify_all_users(message)
+            logger.info("✅ Уведомления отправлены успешно")
             
         except Exception as e:
-            logger.error(f"💥 Ошибка при отправке уведомления: {e}")
+            logger.error(f"💥 Ошибка при отправке уведомления: {e}", exc_info=True)
     
     async def _notify_all_users(self, message: str):
         """Уведомление всех пользователей бота"""
@@ -709,12 +783,20 @@ class UltraClanScanner:
     async def _cleanup(self):
         """Очистка ресурсов"""
         try:
+            logger.info("🧹 Закрытие HTTP сессии...")
             if self.session:
                 await self.session.close()
+                logger.info("✅ HTTP сессия закрыта")
+        except Exception as e:
+            logger.error(f"💥 Ошибка при закрытии сессии: {e}", exc_info=True)
+        
+        try:
+            logger.info("🧹 Закрытие коннектора...")
             if self.connector:
                 await self.connector.close()
+                logger.info("✅ Коннектор закрыт")
         except Exception as e:
-            logger.error(f"💥 Ошибка при очистке ресурсов: {e}")
+            logger.error(f"💥 Ошибка при закрытии коннектора: {e}", exc_info=True)
     
     def _print_final_stats(self):
         """Вывод финальной статистики"""
@@ -792,17 +874,37 @@ async def main():
         logger.error("Установите токен бота для отправки уведомлений")
         sys.exit(1)
     
+    logger.info("✅ Все проверки пройдены, создаем сканер...")
     scanner = UltraClanScanner()
-    await scanner.start_ultra_scan()
     
-    logger.info("🎉 УЛЬТРА СКАНЕР ЗАВЕРШИЛ РАБОТУ!")
+    try:
+        logger.info("🚀 Запуск сканирования...")
+        await scanner.start_ultra_scan()
+        logger.info("🎉 УЛЬТРА СКАНЕР ЗАВЕРШИЛ РАБОТУ УСПЕШНО!")
+    except Exception as e:
+        logger.error(f"💥 Критическая ошибка в main(): {e}", exc_info=True)
+        logger.error("❌ УЛЬТРА СКАНЕР ЗАВЕРШИЛСЯ С ОШИБКОЙ!")
+        raise
 
 
 if __name__ == "__main__":
+    exit_code = 0
     try:
+        logger.info("=" * 80)
+        logger.info("СТАРТ УЛЬТРА СКАНЕРА")
+        logger.info("=" * 80)
         asyncio.run(main())
+        logger.info("=" * 80)
+        logger.info("УЛЬТРА СКАНЕР ЗАВЕРШЕН УСПЕШНО")
+        logger.info("=" * 80)
     except KeyboardInterrupt:
-        logger.info("\n🛑 УЛЬТРА сканер остановлен пользователем")
+        logger.warning("\n🛑 УЛЬТРА сканер остановлен пользователем")
+        exit_code = 130  # Standard exit code for SIGINT
     except Exception as e:
         logger.error(f"💥 Критическая ошибка: {e}", exc_info=True)
-        sys.exit(1)
+        logger.error("=" * 80)
+        logger.error("УЛЬТРА СКАНЕР ЗАВЕРШЕН С ОШИБКОЙ")
+        logger.error("=" * 80)
+        exit_code = 1
+    
+    sys.exit(exit_code)
