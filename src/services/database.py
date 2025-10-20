@@ -136,7 +136,10 @@ class DatabaseService:
                         end_date TEXT NOT NULL,
                         is_active INTEGER NOT NULL DEFAULT 1,
                         payment_id TEXT,
-                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                        amount REAL,
+                        currency TEXT DEFAULT 'RUB',
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
                 
@@ -184,6 +187,40 @@ class DatabaseService:
                     )
                 """)
                 
+                logger.info("🏗️ Создание таблицы отслеживания зданий...")
+                # Создание таблицы отслеживания зданий
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS building_trackers (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        telegram_id INTEGER NOT NULL,
+                        player_tag TEXT NOT NULL,
+                        is_active INTEGER NOT NULL DEFAULT 0,
+                        created_at TEXT NOT NULL,
+                        last_check TEXT,
+                        UNIQUE(telegram_id, player_tag)
+                    )
+                """)
+                
+                logger.info("📸 Создание таблицы снимков зданий...")
+                # Создание таблицы снимков зданий
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS building_snapshots (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        player_tag TEXT NOT NULL,
+                        snapshot_time TEXT NOT NULL,
+                        buildings_data TEXT NOT NULL,
+                        UNIQUE(player_tag, snapshot_time)
+                    )
+                """)
+                
+                logger.info("🔔 Создание таблицы уведомлений...")
+                # Создание таблицы уведомлений
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS notifications (
+                        telegram_id INTEGER PRIMARY KEY
+                    )
+                """)
+                
                 # Создание индексов для оптимизации
                 logger.info("⚡ Создание индексов...")
                 await db.execute("CREATE INDEX IF NOT EXISTS idx_wars_end_time ON wars(end_time)")
@@ -198,157 +235,9 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"❌ Ошибка при инициализации базы данных: {e}")
             raise
-            
-            # Создание индекса для профилей
-            await db.execute("""
-                CREATE INDEX IF NOT EXISTS idx_user_profiles_telegram_id 
-                ON user_profiles(telegram_id)
-            """)
-            
-            # Создание таблицы войн
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS wars (
-                    end_time TEXT PRIMARY KEY,
-                    opponent_name TEXT NOT NULL,
-                    team_size INTEGER NOT NULL,
-                    clan_stars INTEGER NOT NULL,
-                    opponent_stars INTEGER NOT NULL,
-                    clan_destruction REAL NOT NULL,
-                    opponent_destruction REAL NOT NULL,
-                    clan_attacks_used INTEGER NOT NULL,
-                    result TEXT NOT NULL,
-                    is_cwl_war INTEGER NOT NULL DEFAULT 0,
-                    total_violations INTEGER DEFAULT 0
-                )
-            """)
-            
-            # Создание таблицы атак
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS attacks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    war_id TEXT NOT NULL,
-                    attacker_tag TEXT,
-                    attacker_name TEXT NOT NULL,
-                    defender_tag TEXT,
-                    stars INTEGER NOT NULL,
-                    destruction REAL NOT NULL,
-                    attack_order INTEGER,
-                    attack_timestamp INTEGER,
-                    is_rule_violation INTEGER,
-                    FOREIGN KEY (war_id) REFERENCES wars(end_time)
-                )
-            """)
-            
-            # Создание таблицы сезонов ЛВК
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS cwl_seasons (
-                    season_date TEXT PRIMARY KEY,
-                    participants_json TEXT,
-                    bonus_results_json TEXT
-                )
-            """)
-            
-            # Создание таблицы снимков статистики игроков
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS player_stats_snapshots (
-                    snapshot_time TEXT NOT NULL,
-                    player_tag TEXT NOT NULL,
-                    donations INTEGER NOT NULL,
-                    PRIMARY KEY (snapshot_time, player_tag)
-                )
-            """)
-            
-            # Создание таблицы уведомлений
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS notifications (
-                    telegram_id INTEGER PRIMARY KEY
-                )
-            """)
-            
-            # Создание таблицы подписок
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS subscriptions (
-                    telegram_id INTEGER PRIMARY KEY,
-                    subscription_type TEXT NOT NULL,
-                    start_date TEXT NOT NULL,
-                    end_date TEXT NOT NULL,
-                    is_active INTEGER NOT NULL DEFAULT 1,
-                    payment_id TEXT,
-                    amount REAL,
-                    currency TEXT DEFAULT 'RUB',
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )
-            """)
-            
-            # Создание таблицы отслеживания зданий
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS building_trackers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    telegram_id INTEGER NOT NULL,
-                    player_tag TEXT NOT NULL,
-                    is_active INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL,
-                    last_check TEXT,
-                    UNIQUE(telegram_id, player_tag)
-                )
-            """)
-            
-            # Создание таблицы снимков зданий
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS building_snapshots (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    player_tag TEXT NOT NULL,
-                    snapshot_time TEXT NOT NULL,
-                    buildings_data TEXT NOT NULL,
-                    UNIQUE(player_tag, snapshot_time)
-                )
-            """)
-            
-            # Создание таблицы привязанных кланов
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS linked_clans (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    telegram_id INTEGER NOT NULL,
-                    clan_tag TEXT NOT NULL,
-                    clan_name TEXT NOT NULL,
-                    slot_number INTEGER NOT NULL,
-                    created_at TEXT NOT NULL,
-                    UNIQUE(telegram_id, slot_number)
-                )
-            """)
-            
-            # Создание индекса для привязанных кланов
-            await db.execute("""
-                CREATE INDEX IF NOT EXISTS idx_linked_clans_telegram_id 
-                ON linked_clans(telegram_id)
-            """)
-            
-            # Создание таблицы запросов на сканирование войн
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS war_scan_requests (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    telegram_id INTEGER NOT NULL,
-                    clan_tag TEXT NOT NULL,
-                    request_date TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    wars_added INTEGER DEFAULT 0,
-                    created_at TEXT NOT NULL,
-                    UNIQUE(telegram_id, clan_tag, request_date)
-                )
-            """)
-            
-            # Создание индекса для запросов на сканирование
-            await db.execute("""
-                CREATE INDEX IF NOT EXISTS idx_war_scan_requests_telegram_id_date 
-                ON war_scan_requests(telegram_id, request_date)
-            """)
-            
-            await db.commit()
-            logger.info("База данных успешно инициализирована")
-            
-            # Add permanent PRO PLUS subscription for specified user
-            await self._grant_permanent_proplus_subscription(5545099444)
+        
+        # Add permanent PRO PLUS subscription for specified user
+        await self._grant_permanent_proplus_subscription(5545099444)
     
     async def _grant_permanent_proplus_subscription(self, telegram_id: int):
         """Предоставление вечной PRO PLUS подписки для указанного пользователя"""
