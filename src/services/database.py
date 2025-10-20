@@ -136,7 +136,10 @@ class DatabaseService:
                         end_date TEXT NOT NULL,
                         is_active INTEGER NOT NULL DEFAULT 1,
                         payment_id TEXT,
-                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                        amount REAL,
+                        currency TEXT DEFAULT 'RUB',
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
                 
@@ -181,6 +184,40 @@ class DatabaseService:
                         wars_added INTEGER NOT NULL DEFAULT 0,
                         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                         completed_at TEXT
+                    )
+                """)
+                
+                logger.info("🏗️ Создание таблицы отслеживания зданий...")
+                # Создание таблицы отслеживания зданий
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS building_trackers (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        telegram_id INTEGER NOT NULL,
+                        player_tag TEXT NOT NULL,
+                        is_active INTEGER NOT NULL DEFAULT 0,
+                        created_at TEXT NOT NULL,
+                        last_check TEXT,
+                        UNIQUE(telegram_id, player_tag)
+                    )
+                """)
+                
+                logger.info("📸 Создание таблицы снимков зданий...")
+                # Создание таблицы снимков зданий
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS building_snapshots (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        player_tag TEXT NOT NULL,
+                        snapshot_time TEXT NOT NULL,
+                        buildings_data TEXT NOT NULL,
+                        UNIQUE(player_tag, snapshot_time)
+                    )
+                """)
+                
+                logger.info("🔔 Создание таблицы уведомлений...")
+                # Создание таблицы уведомлений
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS notifications (
+                        telegram_id INTEGER PRIMARY KEY
                     )
                 """)
                 
