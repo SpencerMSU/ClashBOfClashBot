@@ -119,8 +119,8 @@ class DatabaseService:
                         telegram_id INTEGER NOT NULL,
                         clan_tag TEXT NOT NULL,
                         clan_name TEXT NOT NULL,
-                        linked_at TEXT NOT NULL,
-                        is_active INTEGER NOT NULL DEFAULT 1,
+                        slot_number INTEGER NOT NULL,
+                        created_at TEXT NOT NULL,
                         UNIQUE(telegram_id, clan_tag)
                     )
                 """)
@@ -162,13 +162,12 @@ class DatabaseService:
                 logger.info("📊 Создание таблицы снапшотов донатов...")
                 # Создание таблицы снапшотов донатов
                 await db.execute("""
-                    CREATE TABLE IF NOT EXISTS donation_snapshots (
+                    CREATE TABLE IF NOT EXISTS player_stats_snapshots (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         player_tag TEXT NOT NULL,
-                        donations_given INTEGER NOT NULL DEFAULT 0,
-                        donations_received INTEGER NOT NULL DEFAULT 0,
-                        snapshot_date TEXT NOT NULL,
-                        UNIQUE(player_tag, snapshot_date)
+                        snapshot_time TEXT NOT NULL,
+                        donations INTEGER NOT NULL DEFAULT 0,
+                        UNIQUE(player_tag, snapshot_time)
                     )
                 """)
                 
@@ -180,10 +179,23 @@ class DatabaseService:
                         telegram_id INTEGER NOT NULL,
                         clan_tag TEXT NOT NULL,
                         request_type TEXT NOT NULL,
+                        request_date TEXT NOT NULL,
                         status TEXT NOT NULL DEFAULT 'pending',
                         wars_added INTEGER NOT NULL DEFAULT 0,
                         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                         completed_at TEXT
+                    )
+                """)
+                
+                logger.info("🏆 Создание таблицы сезонов ЛВК...")
+                # Создание таблицы для сезонов CWL (Clan War League)
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS cwl_seasons (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        season_date TEXT NOT NULL UNIQUE,
+                        bonus_results_json TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
                 
