@@ -1142,7 +1142,7 @@ class DatabaseService:
             logger.error(f"Ошибка при проверке лимита запросов сканирования: {e}")
             return False
     
-    async def save_war_scan_request(self, telegram_id: int, clan_tag: str, status: str, wars_added: int = 0) -> bool:
+    async def save_war_scan_request(self, telegram_id: int, clan_tag: str, status: str, wars_added: int = 0, request_type: str = "manual") -> bool:
         """Сохранение запроса на сканирование войн"""
         try:
             today = datetime.now().date().isoformat()
@@ -1150,9 +1150,9 @@ class DatabaseService:
             async with aiosqlite.connect(self.db_path) as db:
                 await db.execute(
                     "INSERT INTO war_scan_requests "
-                    "(telegram_id, clan_tag, request_date, status, wars_added, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (telegram_id, clan_tag, today, status, wars_added, created_at)
+                    "(telegram_id, clan_tag, request_type, request_date, status, wars_added, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (telegram_id, clan_tag, request_type, today, status, wars_added, created_at)
                 )
                 await db.commit()
                 return True
