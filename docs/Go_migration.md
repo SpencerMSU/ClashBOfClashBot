@@ -434,7 +434,8 @@ type RefundResponse struct {
   - [ ] `BOT_USERNAME` - имя пользователя бота
   - [ ] `COC_API_TOKEN` - токен Clash of Clans API
   - [ ] `COC_API_BASE_URL` - базовый URL API
-  - [ ] `DATABASE_PATH` - путь к базе данных
+  - [ ] `MONGODB_URI` - строка подключения к базе данных
+  - [ ] `MONGODB_DB_NAME` - имя базы данных
   - [ ] `YOOKASSA_SHOP_ID` - ID магазина YooKassa
   - [ ] `YOOKASSA_SECRET_KEY` - секретный ключ YooKassa
   - [ ] `ARCHIVE_CHECK_INTERVAL` - интервал архивации
