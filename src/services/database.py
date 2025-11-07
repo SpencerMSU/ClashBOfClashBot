@@ -1,1177 +1,751 @@
-"""
-Сервис для работы с базой данных - аналог Java DatabaseService
-"""
-import aiosqlite
+"""MongoDB-backed database service for the ClashBot project."""
 import logging
-import os
-from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
-import json
+from typing import Any, Dict, List, Optional
 
+try:
+    from motor.motor_asyncio import AsyncIOMotorClient
+except ImportError as exc:  # pragma: no cover - environment specific
+    raise RuntimeError(
+        "The 'motor' package is required to use the MongoDB database service. "
+        "Install it with 'pip install motor'."
+    ) from exc
+
+from pymongo import ASCENDING, DESCENDING, UpdateOne
+from pymongo.errors import PyMongoError
+
+from config.config import config
+from src.models.building import BuildingSnapshot, BuildingTracker
+from src.models.linked_clan import LinkedClan
+from src.models.subscription import Subscription
 from src.models.user import User
 from src.models.user_profile import UserProfile
-from src.models.war import WarToSave, AttackData
-from src.models.subscription import Subscription
-from src.models.building import BuildingSnapshot, BuildingUpgrade, BuildingTracker
-from src.models.linked_clan import LinkedClan
-from config.config import config
+from src.models.war import WarToSave
 
 logger = logging.getLogger(__name__)
 
 
 class DatabaseService:
-    """Сервис для работы с SQLite базой данных"""
-    
-    def __init__(self, db_path: str = None):
-        self.db_path = db_path or config.DATABASE_PATH
-        
-        # Логирование пути к базе данных для диагностики
-        abs_path = os.path.abspath(self.db_path)
-        logger.info(f"📂 DatabaseService инициализирован с путем: {abs_path}")
-        
-        # Проверка возможности доступа к папке БД
-        db_dir = os.path.dirname(abs_path)
-        if not os.path.exists(db_dir):
-            logger.error(f"❌ Папка для БД не существует: {db_dir}")
-        elif not os.access(db_dir, os.W_OK):
-            logger.error(f"❌ Нет прав на запись в папку БД: {db_dir}")
-        else:
-            logger.info(f"✅ Папка БД доступна для записи: {db_dir}")
-    
-    async def init_db(self):
-        """Полная инициализация базы данных со всеми таблицами"""
-        logger.info("🗄️ Инициализация базы данных...")
-        
+    """Database abstraction layer implemented on top of MongoDB."""
+
+    def __init__(self, mongo_uri: str = None, db_name: str = None):
+        self.mongo_uri = mongo_uri or getattr(config, "MONGODB_URI", "mongodb://localhost:27017")
+        self.db_name = db_name or getattr(config, "MONGODB_DB_NAME", "clashbot")
+
+        self.client = AsyncIOMotorClient(self.mongo_uri)
+        self.db = self.client[self.db_name]
+
+        # Shortcuts for frequently used collections
+        self.users = self.db["users"]
+        self.user_profiles = self.db["user_profiles"]
+        self.wars = self.db["wars"]
+        self.subscriptions = self.db["subscriptions"]
+        self.notifications = self.db["notifications"]
+        self.building_trackers = self.db["building_trackers"]
+        self.building_snapshots = self.db["building_snapshots"]
+        self.player_stats_snapshots = self.db["player_stats_snapshots"]
+        self.linked_clans = self.db["linked_clans"]
+        self.war_scan_requests = self.db["war_scan_requests"]
+        self.cwl_seasons = self.db["cwl_seasons"]
+
+        logger.info("🔗 DatabaseService initialised for MongoDB URI %s, database '%s'", self.mongo_uri, self.db_name)
+
+    async def ping(self) -> bool:
+        """Ping the MongoDB deployment to ensure the connection works."""
         try:
-            async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
-                # Настройки для предотвращения блокировок
-                await db.execute("PRAGMA journal_mode=WAL")
-                await db.execute("PRAGMA synchronous=NORMAL")
-                await db.execute("PRAGMA cache_size=10000")
-                await db.execute("PRAGMA temp_store=memory")
-                await db.execute("PRAGMA busy_timeout=30000")  # 30 секунд ожидания
-                
-                logger.info("📋 Создание таблицы пользователей...")
-                # Создание таблицы пользователей
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS users (
-                        telegram_id INTEGER PRIMARY KEY,
-                        player_tag TEXT NOT NULL UNIQUE
-                    )
-                """)
-                
-                logger.info("👤 Создание таблицы профилей пользователей...")
-                # Создание таблицы профилей для премиум пользователей
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS user_profiles (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        telegram_id INTEGER NOT NULL,
-                        player_tag TEXT NOT NULL,
-                        profile_name TEXT,
-                        is_primary INTEGER NOT NULL DEFAULT 0,
-                        created_at TEXT NOT NULL,
-                        UNIQUE(telegram_id, player_tag)
-                    )
-                """)
-                
-                logger.info("⚔️ Создание таблицы войн...")
-                # Создание таблицы войн
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS wars (
-                        end_time TEXT PRIMARY KEY,
-                        opponent_name TEXT NOT NULL,
-                        team_size INTEGER NOT NULL,
-                        clan_stars INTEGER NOT NULL DEFAULT 0,
-                        opponent_stars INTEGER NOT NULL DEFAULT 0,
-                        clan_destruction REAL NOT NULL DEFAULT 0.0,
-                        opponent_destruction REAL NOT NULL DEFAULT 0.0,
-                        clan_attacks_used INTEGER NOT NULL DEFAULT 0,
-                        result TEXT NOT NULL,
-                        is_cwl_war INTEGER NOT NULL DEFAULT 0,
-                        total_violations INTEGER NOT NULL DEFAULT 0,
-                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                
-                logger.info("🗡️ Создание таблицы атак...")
-                # Создание таблицы атак
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS attacks (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        war_id TEXT NOT NULL,
-                        attacker_tag TEXT NOT NULL,
-                        attacker_name TEXT NOT NULL,
-                        defender_tag TEXT NOT NULL,
-                        stars INTEGER NOT NULL DEFAULT 0,
-                        destruction REAL NOT NULL DEFAULT 0.0,
-                        attack_order INTEGER NOT NULL DEFAULT 0,
-                        attack_timestamp INTEGER NOT NULL DEFAULT 0,
-                        is_rule_violation INTEGER NOT NULL DEFAULT 0,
-                        FOREIGN KEY (war_id) REFERENCES wars (end_time)
-                    )
-                """)
-                
-                logger.info("🏰 Создание таблицы привязанных кланов...")
-                # Создание таблицы привязанных кланов
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS linked_clans (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        telegram_id INTEGER NOT NULL,
-                        clan_tag TEXT NOT NULL,
-                        clan_name TEXT NOT NULL,
-                        slot_number INTEGER NOT NULL,
-                        created_at TEXT NOT NULL,
-                        UNIQUE(telegram_id, clan_tag)
-                    )
-                """)
-                
-                logger.info("💳 Создание таблицы подписок...")
-                # Создание таблицы подписок
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS subscriptions (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        telegram_id INTEGER NOT NULL UNIQUE,
-                        subscription_type TEXT NOT NULL,
-                        start_date TEXT NOT NULL,
-                        end_date TEXT NOT NULL,
-                        is_active INTEGER NOT NULL DEFAULT 1,
-                        payment_id TEXT,
-                        amount REAL,
-                        currency TEXT DEFAULT 'RUB',
-                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                
-                logger.info("🏢 Создание таблицы зданий...")
-                # Создание таблицы зданий
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS buildings (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        player_tag TEXT NOT NULL,
-                        building_name TEXT NOT NULL,
-                        level INTEGER NOT NULL,
-                        is_maxed INTEGER NOT NULL DEFAULT 0,
-                        upgrade_cost INTEGER,
-                        upgrade_time INTEGER,
-                        last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE(player_tag, building_name)
-                    )
-                """)
-                
-                logger.info("📊 Создание таблицы снапшотов донатов...")
-                # Создание таблицы снапшотов донатов
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS player_stats_snapshots (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        player_tag TEXT NOT NULL,
-                        snapshot_time TEXT NOT NULL,
-                        donations INTEGER NOT NULL DEFAULT 0,
-                        UNIQUE(player_tag, snapshot_time)
-                    )
-                """)
-                
-                logger.info("🔍 Создание таблицы запросов сканирования...")
-                # Создание таблицы запросов сканирования войн
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS war_scan_requests (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        telegram_id INTEGER NOT NULL,
-                        clan_tag TEXT NOT NULL,
-                        request_type TEXT NOT NULL,
-                        request_date TEXT NOT NULL,
-                        status TEXT NOT NULL DEFAULT 'pending',
-                        wars_added INTEGER NOT NULL DEFAULT 0,
-                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                        completed_at TEXT
-                    )
-                """)
-                
-                logger.info("🏆 Создание таблицы сезонов ЛВК...")
-                # Создание таблицы для сезонов CWL (Clan War League)
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS cwl_seasons (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        season_date TEXT NOT NULL UNIQUE,
-                        bonus_results_json TEXT,
-                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
-                
-                logger.info("🏗️ Создание таблицы отслеживания зданий...")
-                # Создание таблицы отслеживания зданий
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS building_trackers (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        telegram_id INTEGER NOT NULL,
-                        player_tag TEXT NOT NULL,
-                        is_active INTEGER NOT NULL DEFAULT 0,
-                        created_at TEXT NOT NULL,
-                        last_check TEXT,
-                        UNIQUE(telegram_id, player_tag)
-                    )
-                """)
-                
-                logger.info("📸 Создание таблицы снимков зданий...")
-                # Создание таблицы снимков зданий
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS building_snapshots (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        player_tag TEXT NOT NULL,
-                        snapshot_time TEXT NOT NULL,
-                        buildings_data TEXT NOT NULL,
-                        UNIQUE(player_tag, snapshot_time)
-                    )
-                """)
-                
-                logger.info("🔔 Создание таблицы уведомлений...")
-                # Создание таблицы уведомлений
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS notifications (
-                        telegram_id INTEGER PRIMARY KEY
-                    )
-                """)
-                
-                # Создание индексов для оптимизации
-                logger.info("⚡ Создание индексов...")
-                await db.execute("CREATE INDEX IF NOT EXISTS idx_wars_end_time ON wars(end_time)")
-                await db.execute("CREATE INDEX IF NOT EXISTS idx_attacks_war_id ON attacks(war_id)")
-                await db.execute("CREATE INDEX IF NOT EXISTS idx_attacks_attacker ON attacks(attacker_tag)")
-                await db.execute("CREATE INDEX IF NOT EXISTS idx_linked_clans_telegram ON linked_clans(telegram_id)")
-                await db.execute("CREATE INDEX IF NOT EXISTS idx_buildings_player ON buildings(player_tag)")
-                
-                await db.commit()
-                logger.info("✅ База данных успешно инициализирована со всеми таблицами!")
-                
-        except Exception as e:
-            logger.error(f"❌ Ошибка при инициализации базы данных: {e}")
+            await self.client.admin.command("ping")
+            return True
+        except Exception as exc:  # pragma: no cover - network failure specific
+            logger.error("❌ MongoDB ping failed: %s", exc)
             raise
-        
-        # Add permanent PRO PLUS subscription for specified user
-        await self._grant_permanent_proplus_subscription(5545099444)
-    
-    async def _grant_permanent_proplus_subscription(self, telegram_id: int):
-        """Предоставление вечной PRO PLUS подписки для указанного пользователя"""
+
+    async def init_db(self):
+        """Initialise MongoDB collections and indexes used by the bot."""
+        logger.info("🛠️ Ensuring MongoDB indexes are created")
         try:
-            # Create a subscription that expires in 100 years (essentially permanent)
+            await self.ping()
+
+            await self.users.create_index("telegram_id", unique=True)
+            await self.users.create_index("player_tag", unique=True, sparse=True)
+
+            await self.user_profiles.create_index([("telegram_id", ASCENDING), ("player_tag", ASCENDING)], unique=True)
+            await self.user_profiles.create_index([("telegram_id", ASCENDING), ("is_primary", DESCENDING), ("created_at", ASCENDING)])
+
+            await self.wars.create_index("end_time", unique=True)
+            await self.wars.create_index("is_cwl_war")
+            await self.wars.create_index("created_at")
+
+            await self.subscriptions.create_index("telegram_id", unique=True)
+            await self.subscriptions.create_index("end_date")
+            await self.subscriptions.create_index("is_active")
+
+            await self.notifications.create_index("telegram_id", unique=True)
+
+            await self.building_trackers.create_index([("telegram_id", ASCENDING), ("player_tag", ASCENDING)], unique=True)
+            await self.building_trackers.create_index("is_active")
+
+            await self.building_snapshots.create_index([("player_tag", ASCENDING), ("snapshot_time", DESCENDING)], unique=True)
+
+            await self.player_stats_snapshots.create_index([("player_tag", ASCENDING), ("snapshot_time", ASCENDING)])
+
+            await self.linked_clans.create_index([("telegram_id", ASCENDING), ("slot_number", ASCENDING)], unique=True)
+            await self.linked_clans.create_index([("telegram_id", ASCENDING), ("clan_tag", ASCENDING)], unique=True)
+
+            await self.war_scan_requests.create_index("telegram_id")
+            await self.war_scan_requests.create_index("request_date")
+            await self.war_scan_requests.create_index("status")
+
+            await self.cwl_seasons.create_index("season_date", unique=True)
+
+            logger.info("✅ MongoDB collections are ready")
+        except Exception as exc:
+            logger.error("❌ Failed to initialise MongoDB: %s", exc)
+            raise
+
+        await self._grant_permanent_proplus_subscription(5545099444)
+
+    async def _grant_permanent_proplus_subscription(self, telegram_id: int):
+        """Ensure the specified Telegram user always has a PRO PLUS subscription."""
+        try:
             start_date = datetime.now()
-            end_date = start_date + timedelta(days=36500)  # ~100 years
-            
-            permanent_subscription = Subscription(
+            end_date = start_date + timedelta(days=36500)
+
+            subscription = Subscription(
                 telegram_id=telegram_id,
                 subscription_type="proplus_permanent",
                 start_date=start_date,
                 end_date=end_date,
                 is_active=True,
                 payment_id="PERMANENT_GRANT",
-                amount=0.0
+                amount=0.0,
             )
-            
-            await self.save_subscription(permanent_subscription)
-            logger.info(f"Предоставлена вечная PRO PLUS подписка для пользователя {telegram_id}")
-        
-        except Exception as e:
-            logger.error(f"Ошибка при предоставлении вечной подписки: {e}")
-    
+            await self.save_subscription(subscription)
+            logger.info("🎁 Permanent PRO PLUS subscription ensured for %s", telegram_id)
+        except Exception as exc:  # pragma: no cover - safety net
+            logger.error("Ошибка при предоставлении вечной подписки: %s", exc)
+
+    # ------------------------------------------------------------------
+    # User management
+    # ------------------------------------------------------------------
     async def find_user(self, telegram_id: int) -> Optional[User]:
-        """Поиск пользователя по Telegram ID"""
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(
-                "SELECT telegram_id, player_tag FROM users WHERE telegram_id = ?",
-                (telegram_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    return User(telegram_id=row[0], player_tag=row[1])
-                return None
-    
+        doc = await self.users.find_one({"telegram_id": telegram_id})
+        if doc:
+            return User(telegram_id=doc["telegram_id"], player_tag=doc.get("player_tag", ""))
+        return None
+
     async def save_user(self, user: User) -> bool:
-        """Сохранение пользователя"""
         try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute(
-                    "INSERT OR REPLACE INTO users (telegram_id, player_tag) VALUES (?, ?)",
-                    (user.telegram_id, user.player_tag)
-                )
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении пользователя: {e}")
+            await self.users.update_one(
+                {"telegram_id": user.telegram_id},
+                {"$set": {"telegram_id": user.telegram_id, "player_tag": user.player_tag}},
+                upsert=True,
+            )
+            return True
+        except PyMongoError as exc:
+            logger.error("Ошибка при сохранении пользователя: %s", exc)
             return False
-    
+
     async def delete_user(self, telegram_id: int) -> bool:
-        """Удаление пользователя"""
         try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute("DELETE FROM users WHERE telegram_id = ?", (telegram_id,))
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при удалении пользователя: {e}")
+            await self.users.delete_one({"telegram_id": telegram_id})
+            return True
+        except PyMongoError as exc:
+            logger.error("Ошибка при удалении пользователя: %s", exc)
             return False
-    
+
     async def get_all_users(self) -> List[Dict[str, Any]]:
-        """Получение всех пользователей для уведомлений"""
-        users = []
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute(
-                    "SELECT telegram_id, player_tag FROM users"
-                ) as cursor:
-                    async for row in cursor:
-                        users.append({
-                            'telegram_id': row[0],
-                            'player_tag': row[1]
-                        })
-        except Exception as e:
-            logger.error(f"Ошибка при получении всех пользователей: {e}")
+        users: List[Dict[str, Any]] = []
+        async for doc in self.users.find({}, {"_id": 0}).sort("telegram_id", ASCENDING):
+            users.append({"telegram_id": doc["telegram_id"], "player_tag": doc.get("player_tag")})
         return users
 
-    # Методы управления профилями для премиум пользователей
+    # ------------------------------------------------------------------
+    # User profiles
+    # ------------------------------------------------------------------
     async def save_user_profile(self, profile: UserProfile) -> bool:
-        """Сохранение профиля пользователя"""
         try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute("""
-                    INSERT OR REPLACE INTO user_profiles 
-                    (telegram_id, player_tag, profile_name, is_primary, created_at)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (profile.telegram_id, profile.player_tag, profile.profile_name, 
-                      profile.is_primary, profile.created_at))
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении профиля: {e}")
+            if profile.is_primary:
+                await self.user_profiles.update_many({"telegram_id": profile.telegram_id}, {"$set": {"is_primary": False}})
+
+            await self.user_profiles.update_one(
+                {"telegram_id": profile.telegram_id, "player_tag": profile.player_tag},
+                {
+                    "$set": {
+                        "telegram_id": profile.telegram_id,
+                        "player_tag": profile.player_tag,
+                        "profile_name": profile.profile_name,
+                        "is_primary": bool(profile.is_primary),
+                        "created_at": profile.created_at,
+                    }
+                },
+                upsert=True,
+            )
+            return True
+        except PyMongoError as exc:
+            logger.error("Ошибка при сохранении профиля: %s", exc)
             return False
 
     async def get_user_profiles(self, telegram_id: int) -> List[UserProfile]:
-        """Получение всех профилей пользователя"""
-        profiles = []
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute("""
-                    SELECT id, telegram_id, player_tag, profile_name, is_primary, created_at
-                    FROM user_profiles WHERE telegram_id = ? ORDER BY is_primary DESC, created_at ASC
-                """, (telegram_id,)) as cursor:
-                    async for row in cursor:
-                        profile = UserProfile(
-                            telegram_id=row[1],
-                            player_tag=row[2],
-                            profile_name=row[3],
-                            is_primary=bool(row[4]),
-                            created_at=row[5]
-                        )
-                        profile.profile_id = row[0]
-                        profiles.append(profile)
-        except Exception as e:
-            logger.error(f"Ошибка при получении профилей: {e}")
+        profiles: List[UserProfile] = []
+        cursor = self.user_profiles.find({"telegram_id": telegram_id}).sort(
+            [("is_primary", DESCENDING), ("created_at", ASCENDING)]
+        )
+        async for doc in cursor:
+            profile = UserProfile(
+                telegram_id=doc["telegram_id"],
+                player_tag=doc["player_tag"],
+                profile_name=doc.get("profile_name"),
+                is_primary=bool(doc.get("is_primary", False)),
+                created_at=doc.get("created_at"),
+            )
+            profile.profile_id = str(doc.get("_id"))
+            profiles.append(profile)
         return profiles
 
     async def delete_user_profile(self, telegram_id: int, player_tag: str) -> bool:
-        """Удаление профиля пользователя"""
         try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute("""
-                    DELETE FROM user_profiles WHERE telegram_id = ? AND player_tag = ?
-                """, (telegram_id, player_tag))
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при удалении профиля: {e}")
+            await self.user_profiles.delete_one({"telegram_id": telegram_id, "player_tag": player_tag})
+            return True
+        except PyMongoError as exc:
+            logger.error("Ошибка при удалении профиля: %s", exc)
             return False
 
     async def get_user_profile_count(self, telegram_id: int) -> int:
-        """Получение количества профилей пользователя"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute("""
-                    SELECT COUNT(*) FROM user_profiles WHERE telegram_id = ?
-                """, (telegram_id,)) as cursor:
-                    row = await cursor.fetchone()
-                    return row[0] if row else 0
-        except Exception as e:
-            logger.error(f"Ошибка при подсчете профилей: {e}")
-            return 0
+        return await self.user_profiles.count_documents({"telegram_id": telegram_id})
 
     async def set_primary_profile(self, telegram_id: int, player_tag: str) -> bool:
-        """Установка основного профиля пользователя"""
         try:
-            async with aiosqlite.connect(self.db_path) as db:
-                # Сначала убираем флаг primary у всех профилей пользователя
-                await db.execute("""
-                    UPDATE user_profiles SET is_primary = 0 WHERE telegram_id = ?
-                """, (telegram_id,))
-                
-                # Затем устанавливаем флаг для выбранного профиля
-                await db.execute("""
-                    UPDATE user_profiles SET is_primary = 1 
-                    WHERE telegram_id = ? AND player_tag = ?
-                """, (telegram_id, player_tag))
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при установке основного профиля: {e}")
+            await self.user_profiles.update_many({"telegram_id": telegram_id}, {"$set": {"is_primary": False}})
+            result = await self.user_profiles.update_one(
+                {"telegram_id": telegram_id, "player_tag": player_tag},
+                {"$set": {"is_primary": True}},
+            )
+            return result.matched_count > 0
+        except PyMongoError as exc:
+            logger.error("Ошибка при установке основного профиля: %s", exc)
             return False
 
     async def get_primary_profile(self, telegram_id: int) -> Optional[UserProfile]:
-        """Получение основного профиля пользователя"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute("""
-                    SELECT id, telegram_id, player_tag, profile_name, is_primary, created_at
-                    FROM user_profiles WHERE telegram_id = ? AND is_primary = 1
-                """, (telegram_id,)) as cursor:
-                    row = await cursor.fetchone()
-                    if row:
-                        profile = UserProfile(
-                            telegram_id=row[1],
-                            player_tag=row[2],
-                            profile_name=row[3],
-                            is_primary=bool(row[4]),
-                            created_at=row[5]
-                        )
-                        profile.profile_id = row[0]
-                        return profile
-        except Exception as e:
-            logger.error(f"Ошибка при получении основного профиля: {e}")
+        doc = await self.user_profiles.find_one({"telegram_id": telegram_id, "is_primary": True})
+        if doc:
+            profile = UserProfile(
+                telegram_id=doc["telegram_id"],
+                player_tag=doc["player_tag"],
+                profile_name=doc.get("profile_name"),
+                is_primary=True,
+                created_at=doc.get("created_at"),
+            )
+            profile.profile_id = str(doc.get("_id"))
+            return profile
         return None
-    
+
+    # ------------------------------------------------------------------
+    # Wars
+    # ------------------------------------------------------------------
     async def save_war(self, war: WarToSave) -> bool:
-        """Сохранение войны с retry логикой и защитой от блокировок"""
-        import asyncio
-        
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                async with aiosqlite.connect(self.db_path, timeout=30.0) as db:
-                    # Настройки для предотвращения блокировок
-                    await db.execute("PRAGMA busy_timeout=30000")
-                    await db.execute("PRAGMA journal_mode=WAL")
-                    
-                    # Сохранение основной информации о войне
-                    await db.execute("""
-                        INSERT OR REPLACE INTO wars 
-                        (end_time, opponent_name, team_size, clan_stars, opponent_stars,
-                         clan_destruction, opponent_destruction, clan_attacks_used, result,
-                         is_cwl_war, total_violations)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        war.end_time, war.opponent_name, war.team_size,
-                        war.clan_stars, war.opponent_stars, war.clan_destruction,
-                        war.opponent_destruction, war.clan_attacks_used, war.result,
-                        1 if war.is_cwl_war else 0, war.total_violations
-                    ))
-                    
-                    # Сохранение атак
-                    if war.attacks_by_member:
-                        for member_tag, attacks in war.attacks_by_member.items():
-                            for attack in attacks:
-                                await db.execute("""
-                                    INSERT INTO attacks 
-                                    (war_id, attacker_tag, attacker_name, defender_tag,
-                                     stars, destruction, attack_order, attack_timestamp, is_rule_violation)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (
-                                    war.end_time, member_tag, attack.get('attacker_name', ''),
-                                    attack.get('defender_tag', ''), attack.get('stars', 0),
-                                    attack.get('destruction', 0.0), attack.get('order', 0),
-                                    attack.get('timestamp', 0), attack.get('is_violation', 0)
-                                ))
-                    
-                    await db.commit()
-                    return True
-                    
-            except Exception as e:
-                error_msg = str(e).lower()
-                if ("database is locked" in error_msg or 
-                    "can't start new thread" in error_msg or
-                    "too many open files" in error_msg) and attempt < max_retries - 1:
-                    
-                    wait_time = 2 + attempt * 2  # Увеличивающаяся задержка: 2, 4, 6 секунд
-                    logger.warning(f"⚠️ Ошибка БД (попытка {attempt + 1}/{max_retries}): {e}")
-                    logger.warning(f"⏳ Ожидание {wait_time} секунд перед повтором...")
-                    await asyncio.sleep(wait_time)
-                    continue
-                else:
-                    logger.error(f"❌ Ошибка при сохранении войны (попытка {attempt + 1}): {e}")
-                    if attempt == max_retries - 1:
-                        return False
-        
-        return False
-    
+        attacks: List[Dict[str, Any]] = []
+        for member_tag, attack_list in (war.attacks_by_member or {}).items():
+            for attack in attack_list:
+                attacks.append(
+                    {
+                        "attacker_tag": member_tag,
+                        "attacker_name": attack.get("attacker_name", ""),
+                        "defender_tag": attack.get("defender_tag", ""),
+                        "stars": attack.get("stars", 0),
+                        "destruction": attack.get("destruction", 0.0),
+                        "order": attack.get("order", 0),
+                        "timestamp": attack.get("timestamp", 0),
+                        "is_violation": bool(attack.get("is_violation", False)),
+                    }
+                )
+        try:
+            await self.wars.update_one(
+                {"end_time": war.end_time},
+                {
+                    "$set": {
+                        "end_time": war.end_time,
+                        "opponent_name": war.opponent_name,
+                        "team_size": war.team_size,
+                        "clan_stars": war.clan_stars,
+                        "opponent_stars": war.opponent_stars,
+                        "clan_destruction": war.clan_destruction,
+                        "opponent_destruction": war.opponent_destruction,
+                        "clan_attacks_used": war.clan_attacks_used,
+                        "result": war.result,
+                        "is_cwl_war": bool(war.is_cwl_war),
+                        "total_violations": war.total_violations,
+                        "attacks": attacks,
+                        "updated_at": datetime.now(),
+                    },
+                    "$setOnInsert": {"created_at": datetime.now()},
+                },
+                upsert=True,
+            )
+            return True
+        except PyMongoError as exc:
+            logger.error("❌ Ошибка при сохранении войны %s: %s", war.end_time, exc)
+            return False
+
     async def war_exists(self, end_time: str) -> bool:
-        """Проверка существования войны с защитой от блокировок"""
-        try:
-            async with aiosqlite.connect(self.db_path, timeout=10.0) as db:
-                await db.execute("PRAGMA busy_timeout=10000")
-                async with db.execute(
-                    "SELECT 1 FROM wars WHERE end_time = ?", (end_time,)
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    return row is not None
-        except Exception as e:
-            logger.warning(f"Ошибка при проверке существования войны {end_time}: {e}")
-            return False  # В случае ошибки считаем что войны нет
-    
+        doc = await self.wars.find_one({"end_time": end_time}, {"_id": 1})
+        return doc is not None
+
     async def get_subscribed_users(self) -> List[int]:
-        """Получение списка пользователей с подпиской на уведомления"""
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("SELECT telegram_id FROM notifications") as cursor:
-                rows = await cursor.fetchall()
-                return [row[0] for row in rows]
-    
+        return [doc["telegram_id"] async for doc in self.notifications.find({}, {"_id": 0, "telegram_id": 1})]
+
     async def toggle_notifications(self, telegram_id: int) -> bool:
-        """Переключение уведомлений для пользователя"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                # Проверяем, есть ли уже подписка
-                async with db.execute(
-                    "SELECT 1 FROM notifications WHERE telegram_id = ?", (telegram_id,)
-                ) as cursor:
-                    exists = await cursor.fetchone()
-                
-                if exists:
-                    # Удаляем подписку
-                    await db.execute("DELETE FROM notifications WHERE telegram_id = ?", (telegram_id,))
-                    await db.commit()
-                    return False  # Уведомления отключены
-                else:
-                    # Добавляем подписку
-                    await db.execute("INSERT INTO notifications (telegram_id) VALUES (?)", (telegram_id,))
-                    await db.commit()
-                    return True  # Уведомления включены
-        except Exception as e:
-            logger.error(f"Ошибка при переключении уведомлений: {e}")
+        if await self.notifications.find_one({"telegram_id": telegram_id}):
+            await self.notifications.delete_one({"telegram_id": telegram_id})
             return False
-    
+        await self.notifications.update_one(
+            {"telegram_id": telegram_id},
+            {"$set": {"telegram_id": telegram_id, "enabled_at": datetime.now()}},
+            upsert=True,
+        )
+        return True
+
     async def save_donation_snapshot(self, members: List[Dict], snapshot_time: str = None):
-        """Сохранение снимка донатов"""
-        if not snapshot_time:
-            snapshot_time = datetime.now().isoformat()
-        
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                for member in members:
-                    await db.execute("""
-                        INSERT OR REPLACE INTO player_stats_snapshots
-                        (snapshot_time, player_tag, donations)
-                        VALUES (?, ?, ?)
-                    """, (
-                        snapshot_time,
-                        member.get('tag', ''),
-                        member.get('donations', 0)
-                    ))
-                await db.commit()
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении снимка донатов: {e}")
-    
-    async def get_war_list(self, limit: int = 10, offset: int = 0) -> List[Dict]:
-        """Получение списка войн"""
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("""
-                SELECT end_time, opponent_name, team_size, clan_stars, opponent_stars,
-                       result, is_cwl_war
-                FROM wars 
-                ORDER BY end_time DESC 
-                LIMIT ? OFFSET ?
-            """, (limit, offset)) as cursor:
-                rows = await cursor.fetchall()
-                return [
+        snapshot_time = snapshot_time or datetime.now().isoformat()
+        operations: List[UpdateOne] = []
+        for member in members:
+            player_tag = member.get("tag")
+            if not player_tag:
+                continue
+            operations.append(
+                UpdateOne(
+                    {"player_tag": player_tag, "snapshot_time": snapshot_time},
                     {
-                        'end_time': row[0],
-                        'opponent_name': row[1],
-                        'team_size': row[2],
-                        'clan_stars': row[3],
-                        'opponent_stars': row[4],
-                        'result': row[5],
-                        'is_cwl_war': bool(row[6])
-                    }
-                    for row in rows
-                ]
-    
-    async def get_cwl_bonus_data(self, year_month: str) -> List[Dict]:
-        """Получение данных о бонусах ЛВК за указанный месяц"""
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("""
-                SELECT bonus_results_json FROM cwl_seasons 
-                WHERE season_date LIKE ?
-            """, (f"{year_month}%",)) as cursor:
-                row = await cursor.fetchone()
-                
-                if row and row[0]:
-                    try:
-                        bonus_data = json.loads(row[0])
-                        return bonus_data if isinstance(bonus_data, list) else []
-                    except json.JSONDecodeError:
-                        logger.error(f"Ошибка декодирования JSON бонусов ЛВК для {year_month}")
-                        return []
-                
-                return []
-    
-    async def get_cwl_season_donation_stats(self, season_start: str, season_end: str) -> Dict[str, int]:
-        """Получение статистики донатов игроков за сезон ЛВК"""
-        async with aiosqlite.connect(self.db_path) as db:
-            # Get snapshots at the start and end of the season
-            async with db.execute("""
-                SELECT player_tag, donations, snapshot_time
-                FROM player_stats_snapshots
-                WHERE snapshot_time >= ? AND snapshot_time <= ?
-                ORDER BY player_tag, snapshot_time
-            """, (season_start, season_end)) as cursor:
-                rows = await cursor.fetchall()
-            
-            # Calculate donation difference for each player
-            player_donations = {}
-            player_snapshots = {}
-            
-            for row in rows:
-                player_tag = row[0]
-                donations = row[1]
-                snapshot_time = row[2]
-                
-                if player_tag not in player_snapshots:
-                    player_snapshots[player_tag] = []
-                player_snapshots[player_tag].append((snapshot_time, donations))
-            
-            # Calculate difference between first and last snapshot
-            for player_tag, snapshots in player_snapshots.items():
-                if len(snapshots) >= 2:
-                    first_donations = snapshots[0][1]
-                    last_donations = snapshots[-1][1]
-                    player_donations[player_tag] = max(0, last_donations - first_donations)
-                elif len(snapshots) == 1:
-                    player_donations[player_tag] = snapshots[0][1]
-            
-            return player_donations
-    
-    async def get_cwl_season_attack_stats(self, season_start: str, season_end: str) -> Dict[str, Dict]:
-        """Получение статистики атак игроков за сезон ЛВК"""
-        async with aiosqlite.connect(self.db_path) as db:
-            # Get all wars in the season
-            async with db.execute("""
-                SELECT end_time, is_cwl_war
-                FROM wars
-                WHERE end_time >= ? AND end_time <= ?
-                ORDER BY end_time
-            """, (season_start, season_end)) as cursor:
-                war_rows = await cursor.fetchall()
-            
-            # Get all attacks for these wars
-            player_stats = {}
-            
-            for war_row in war_rows:
-                war_end_time = war_row[0]
-                is_cwl = bool(war_row[1])
-                
-                async with db.execute("""
-                    SELECT attacker_tag, COUNT(*) as attack_count
-                    FROM attacks
-                    WHERE war_id = ?
-                    GROUP BY attacker_tag
-                """, (war_end_time,)) as cursor:
-                    attack_rows = await cursor.fetchall()
-                
-                for attack_row in attack_rows:
-                    player_tag = attack_row[0]
-                    attack_count = attack_row[1]
-                    
-                    if player_tag not in player_stats:
-                        player_stats[player_tag] = {
-                            'cwl_attacks': 0,
-                            'regular_attacks': 0,
-                            'cwl_wars': 0,
-                            'regular_wars': 0
+                        "$set": {
+                            "player_tag": player_tag,
+                            "snapshot_time": snapshot_time,
+                            "donations": member.get("donations", 0),
                         }
-                    
-                    if is_cwl:
-                        player_stats[player_tag]['cwl_attacks'] += attack_count
-                        player_stats[player_tag]['cwl_wars'] += 1
-                    else:
-                        player_stats[player_tag]['regular_attacks'] += attack_count
-                        player_stats[player_tag]['regular_wars'] += 1
-            
-            return player_stats
-    
+                    },
+                    upsert=True,
+                )
+            )
+        if operations:
+            await self.player_stats_snapshots.bulk_write(operations, ordered=False)
+
+    async def get_war_list(self, limit: int = 10, offset: int = 0) -> List[Dict]:
+        wars: List[Dict[str, Any]] = []
+        cursor = self.wars.find({}, {
+            "_id": 0,
+            "end_time": 1,
+            "opponent_name": 1,
+            "team_size": 1,
+            "clan_stars": 1,
+            "opponent_stars": 1,
+            "result": 1,
+            "is_cwl_war": 1,
+        }).sort("end_time", DESCENDING).skip(offset).limit(limit)
+        async for doc in cursor:
+            wars.append({
+                "end_time": doc.get("end_time"),
+                "opponent_name": doc.get("opponent_name"),
+                "team_size": doc.get("team_size"),
+                "clan_stars": doc.get("clan_stars"),
+                "opponent_stars": doc.get("opponent_stars"),
+                "result": doc.get("result"),
+                "is_cwl_war": bool(doc.get("is_cwl_war", False)),
+            })
+        return wars
+
+    async def get_cwl_bonus_data(self, year_month: str) -> List[Dict]:
+        doc = await self.cwl_seasons.find_one({"season_date": {"$regex": f"^{year_month}"}})
+        if not doc:
+            return []
+        bonus_data = doc.get("bonus_results_json")
+        if isinstance(bonus_data, list):
+            return bonus_data
+        if isinstance(bonus_data, str):
+            try:
+                import json
+
+                parsed = json.loads(bonus_data)
+                return parsed if isinstance(parsed, list) else []
+            except json.JSONDecodeError:
+                logger.error("Ошибка декодирования бонусов CWL за %s", year_month)
+        return []
+
+    async def get_cwl_season_donation_stats(self, season_start: str, season_end: str) -> Dict[str, int]:
+        stats: Dict[str, int] = {}
+        cursor = self.player_stats_snapshots.find(
+            {"snapshot_time": {"$gte": season_start, "$lte": season_end}}
+        ).sort([("player_tag", ASCENDING), ("snapshot_time", ASCENDING)])
+
+        snapshots: Dict[str, List[Dict[str, Any]]] = {}
+        async for doc in cursor:
+            snapshots.setdefault(doc["player_tag"], []).append(doc)
+
+        for player_tag, entries in snapshots.items():
+            if len(entries) >= 2:
+                stats[player_tag] = max(0, entries[-1].get("donations", 0) - entries[0].get("donations", 0))
+            elif entries:
+                stats[player_tag] = entries[0].get("donations", 0)
+        return stats
+
+    async def get_cwl_season_attack_stats(self, season_start: str, season_end: str) -> Dict[str, Dict]:
+        player_stats: Dict[str, Dict[str, int]] = {}
+        cursor = self.wars.find(
+            {"end_time": {"$gte": season_start, "$lte": season_end}},
+            {"end_time": 1, "is_cwl_war": 1, "attacks": 1},
+        ).sort("end_time", ASCENDING)
+
+        async for war_doc in cursor:
+            is_cwl = bool(war_doc.get("is_cwl_war", False))
+            per_war_counts: Dict[str, int] = {}
+            for attack in war_doc.get("attacks", []):
+                tag = attack.get("attacker_tag")
+                if not tag:
+                    continue
+                per_war_counts[tag] = per_war_counts.get(tag, 0) + 1
+
+            for tag, count in per_war_counts.items():
+                stats_entry = player_stats.setdefault(
+                    tag,
+                    {"cwl_attacks": 0, "regular_attacks": 0, "cwl_wars": 0, "regular_wars": 0},
+                )
+                if is_cwl:
+                    stats_entry["cwl_attacks"] += count
+                    stats_entry["cwl_wars"] += 1
+                else:
+                    stats_entry["regular_attacks"] += count
+                    stats_entry["regular_wars"] += 1
+        return player_stats
+
     async def get_war_details(self, end_time: str) -> Optional[Dict]:
-        """Получение детальной информации о войне"""
-        async with aiosqlite.connect(self.db_path) as db:
-            # Получаем основную информацию о войне
-            async with db.execute("""
-                SELECT * FROM wars WHERE end_time = ?
-            """, (end_time,)) as cursor:
-                war_row = await cursor.fetchone()
-                if not war_row:
-                    return None
-            
-            # Получаем атаки
-            async with db.execute("""
-                SELECT attacker_tag, attacker_name, defender_tag, stars, destruction,
-                       attack_order, attack_timestamp, is_rule_violation
-                FROM attacks WHERE war_id = ?
-                ORDER BY attack_order
-            """, (end_time,)) as cursor:
-                attack_rows = await cursor.fetchall()
-            
-            war_data = {
-                'end_time': war_row[0],
-                'opponent_name': war_row[1],
-                'team_size': war_row[2],
-                'clan_stars': war_row[3],
-                'opponent_stars': war_row[4],
-                'clan_destruction': war_row[5],
-                'opponent_destruction': war_row[6],
-                'clan_attacks_used': war_row[7],
-                'result': war_row[8],
-                'is_cwl_war': bool(war_row[9]),
-                'total_violations': war_row[10],
-                'attacks': [
-                    {
-                        'attacker_tag': attack[0],
-                        'attacker_name': attack[1],
-                        'defender_tag': attack[2],
-                        'stars': attack[3],
-                        'destruction': attack[4],
-                        'order': attack[5],
-                        'timestamp': attack[6],
-                        'is_violation': bool(attack[7])
-                    }
-                    for attack in attack_rows
-                ]
-            }
-            
-            return war_data
-    
+        doc = await self.wars.find_one({"end_time": end_time}, {"_id": 0})
+        if not doc:
+            return None
+        doc.setdefault("attacks", [])
+        return doc
+
+    # ------------------------------------------------------------------
+    # Subscriptions
+    # ------------------------------------------------------------------
     async def save_subscription(self, subscription: Subscription) -> bool:
-        """Сохранение подписки"""
         try:
-            async with aiosqlite.connect(self.db_path) as db:
-                now = datetime.now().isoformat()
-                await db.execute("""
-                    INSERT OR REPLACE INTO subscriptions 
-                    (telegram_id, subscription_type, start_date, end_date, is_active, 
-                     payment_id, amount, currency, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    subscription.telegram_id,
-                    subscription.subscription_type,
-                    subscription.start_date.isoformat(),
-                    subscription.end_date.isoformat(),
-                    1 if subscription.is_active else 0,
-                    subscription.payment_id,
-                    subscription.amount,
-                    subscription.currency,
-                    now,
-                    now
-                ))
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении подписки: {e}")
+            now = datetime.now()
+            await self.subscriptions.update_one(
+                {"telegram_id": subscription.telegram_id},
+                {
+                    "$set": {
+                        "telegram_id": subscription.telegram_id,
+                        "subscription_type": subscription.subscription_type,
+                        "start_date": subscription.start_date,
+                        "end_date": subscription.end_date,
+                        "is_active": bool(subscription.is_active),
+                        "payment_id": subscription.payment_id,
+                        "amount": subscription.amount,
+                        "currency": subscription.currency or "RUB",
+                        "updated_at": now,
+                    },
+                    "$setOnInsert": {"created_at": now},
+                },
+                upsert=True,
+            )
+            return True
+        except PyMongoError as exc:
+            logger.error("Ошибка при сохранении подписки: %s", exc)
             return False
-    
+
     async def get_subscription(self, telegram_id: int) -> Optional[Subscription]:
-        """Получение подписки пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("""
-                SELECT telegram_id, subscription_type, start_date, end_date, is_active,
-                       payment_id, amount, currency
-                FROM subscriptions 
-                WHERE telegram_id = ?
-            """, (telegram_id,)) as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    return Subscription(
-                        telegram_id=row[0],
-                        subscription_type=row[1],
-                        start_date=datetime.fromisoformat(row[2]),
-                        end_date=datetime.fromisoformat(row[3]),
-                        is_active=bool(row[4]),
-                        payment_id=row[5],
-                        amount=row[6],
-                        currency=row[7] or "RUB"
-                    )
-                return None
-    
+        doc = await self.subscriptions.find_one({"telegram_id": telegram_id})
+        if not doc:
+            return None
+        return Subscription(
+            telegram_id=doc["telegram_id"],
+            subscription_type=doc.get("subscription_type", ""),
+            start_date=doc.get("start_date", datetime.now()),
+            end_date=doc.get("end_date", datetime.now()),
+            is_active=bool(doc.get("is_active", False)),
+            payment_id=doc.get("payment_id"),
+            amount=doc.get("amount"),
+            currency=doc.get("currency", "RUB"),
+        )
+
     async def extend_subscription(self, telegram_id: int, additional_days: int) -> bool:
-        """Продление подписки"""
-        try:
-            subscription = await self.get_subscription(telegram_id)
-            if subscription:
-                # Продляем существующую подписку
-                new_end_date = subscription.end_date + timedelta(days=additional_days)
-                subscription.end_date = new_end_date
-                subscription.is_active = True
-                return await self.save_subscription(subscription)
+        subscription = await self.get_subscription(telegram_id)
+        if not subscription:
             return False
-        except Exception as e:
-            logger.error(f"Ошибка при продлении подписки: {e}")
-            return False
-    
+        subscription.end_date = subscription.end_date + timedelta(days=additional_days)
+        subscription.is_active = True
+        return await self.save_subscription(subscription)
+
     async def deactivate_subscription(self, telegram_id: int) -> bool:
-        """Деактивация подписки"""
         try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute("""
-                    UPDATE subscriptions 
-                    SET is_active = 0, updated_at = ?
-                    WHERE telegram_id = ?
-                """, (datetime.now().isoformat(), telegram_id))
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при деактивации подписки: {e}")
+            await self.subscriptions.update_one(
+                {"telegram_id": telegram_id},
+                {"$set": {"is_active": False, "updated_at": datetime.now()}},
+            )
+            return True
+        except PyMongoError as exc:
+            logger.error("Ошибка при деактивации подписки: %s", exc)
             return False
-    
+
     async def get_expired_subscriptions(self) -> List[Subscription]:
-        """Получение истекших подписок"""
-        async with aiosqlite.connect(self.db_path) as db:
-            current_time = datetime.now().isoformat()
-            async with db.execute("""
-                SELECT telegram_id, subscription_type, start_date, end_date, is_active,
-                       payment_id, amount, currency
-                FROM subscriptions 
-                WHERE is_active = 1 AND end_date < ?
-            """, (current_time,)) as cursor:
-                rows = await cursor.fetchall()
-                return [
-                    Subscription(
-                        telegram_id=row[0],
-                        subscription_type=row[1],
-                        start_date=datetime.fromisoformat(row[2]),
-                        end_date=datetime.fromisoformat(row[3]),
-                        is_active=bool(row[4]),
-                        payment_id=row[5],
-                        amount=row[6],
-                        currency=row[7] or "RUB"
-                    )
-                    for row in rows
-                ]
-    
+        now = datetime.now()
+        cursor = self.subscriptions.find({"is_active": True, "end_date": {"$lt": now}})
+        results: List[Subscription] = []
+        async for doc in cursor:
+            results.append(
+                Subscription(
+                    telegram_id=doc["telegram_id"],
+                    subscription_type=doc.get("subscription_type", ""),
+                    start_date=doc.get("start_date", now),
+                    end_date=doc.get("end_date", now),
+                    is_active=True,
+                    payment_id=doc.get("payment_id"),
+                    amount=doc.get("amount"),
+                    currency=doc.get("currency", "RUB"),
+                )
+            )
+        return results
+
     async def is_notifications_enabled(self, telegram_id: int) -> bool:
-        """Проверка включены ли уведомления для пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(
-                "SELECT telegram_id FROM notifications WHERE telegram_id = ?",
-                (telegram_id,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                return row is not None
-    
+        return await self.notifications.find_one({"telegram_id": telegram_id}) is not None
+
     async def enable_notifications(self, telegram_id: int) -> bool:
-        """Включение уведомлений для пользователя"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute(
-                    "INSERT OR IGNORE INTO notifications (telegram_id) VALUES (?)",
-                    (telegram_id,)
-                )
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при включении уведомлений: {e}")
-            return False
-    
+        await self.notifications.update_one(
+            {"telegram_id": telegram_id},
+            {"$set": {"telegram_id": telegram_id, "enabled_at": datetime.now()}},
+            upsert=True,
+        )
+        return True
+
     async def disable_notifications(self, telegram_id: int) -> bool:
-        """Отключение уведомлений для пользователя"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute(
-                    "DELETE FROM notifications WHERE telegram_id = ?",
-                    (telegram_id,)
-                )
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при отключении уведомлений: {e}")
-            return False
-    
+        await self.notifications.delete_one({"telegram_id": telegram_id})
+        return True
+
     async def get_notification_users(self) -> List[int]:
-        """Получение списка пользователей с включенными уведомлениями"""
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute("SELECT telegram_id FROM notifications") as cursor:
-                rows = await cursor.fetchall()
-                return [row[0] for row in rows]
-    
-    # Building tracking methods
+        return await self.get_subscribed_users()
+
+    # ------------------------------------------------------------------
+    # Building tracking
+    # ------------------------------------------------------------------
     async def save_building_tracker(self, tracker: BuildingTracker) -> bool:
-        """Сохранение настроек отслеживания зданий"""
         try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute("""
-                    INSERT OR REPLACE INTO building_trackers 
-                    (telegram_id, player_tag, is_active, created_at, last_check)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (tracker.telegram_id, tracker.player_tag, int(tracker.is_active), 
-                      tracker.created_at, tracker.last_check))
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении настроек отслеживания: {e}")
+            await self.building_trackers.update_one(
+                {"telegram_id": tracker.telegram_id, "player_tag": tracker.player_tag},
+                {
+                    "$set": {
+                        "telegram_id": tracker.telegram_id,
+                        "player_tag": tracker.player_tag,
+                        "is_active": bool(tracker.is_active),
+                        "created_at": tracker.created_at,
+                        "last_check": tracker.last_check,
+                    }
+                },
+                upsert=True,
+            )
+            return True
+        except PyMongoError as exc:
+            logger.error("Ошибка при сохранении настроек отслеживания: %s", exc)
             return False
-    
+
     async def get_building_tracker(self, telegram_id: int) -> Optional[BuildingTracker]:
-        """Получение настроек отслеживания зданий пользователя (первый найденный)"""
         trackers = await self.get_user_building_trackers(telegram_id)
         return trackers[0] if trackers else None
 
     async def get_user_building_trackers(self, telegram_id: int) -> List[BuildingTracker]:
-        """Получение всех настроек отслеживания зданий пользователя"""
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(
-                "SELECT telegram_id, player_tag, is_active, created_at, last_check FROM building_trackers WHERE telegram_id = ?",
-                (telegram_id,)
-            ) as cursor:
-                rows = await cursor.fetchall()
-                return [BuildingTracker(
-                    telegram_id=row[0],
-                    player_tag=row[1],
-                    is_active=bool(row[2]),
-                    created_at=row[3],
-                    last_check=row[4]
-                ) for row in rows]
+        trackers: List[BuildingTracker] = []
+        cursor = self.building_trackers.find({"telegram_id": telegram_id})
+        async for doc in cursor:
+            trackers.append(
+                BuildingTracker(
+                    telegram_id=doc["telegram_id"],
+                    player_tag=doc.get("player_tag", ""),
+                    is_active=bool(doc.get("is_active", False)),
+                    created_at=doc.get("created_at"),
+                    last_check=doc.get("last_check"),
+                )
+            )
+        return trackers
 
     async def get_building_tracker_for_profile(self, telegram_id: int, player_tag: str) -> Optional[BuildingTracker]:
-        """Получение настроек отслеживания для конкретного профиля"""
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(
-                "SELECT telegram_id, player_tag, is_active, created_at, last_check FROM building_trackers WHERE telegram_id = ? AND player_tag = ?",
-                (telegram_id, player_tag)
-            ) as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    return BuildingTracker(
-                        telegram_id=row[0],
-                        player_tag=row[1],
-                        is_active=bool(row[2]),
-                        created_at=row[3],
-                        last_check=row[4]
-                    )
-                return None
+        doc = await self.building_trackers.find_one({"telegram_id": telegram_id, "player_tag": player_tag})
+        if doc:
+            return BuildingTracker(
+                telegram_id=doc["telegram_id"],
+                player_tag=doc.get("player_tag", ""),
+                is_active=bool(doc.get("is_active", False)),
+                created_at=doc.get("created_at"),
+                last_check=doc.get("last_check"),
+            )
+        return None
 
     async def toggle_building_tracker_for_profile(self, telegram_id: int, player_tag: str) -> bool:
-        """Переключение отслеживания для конкретного профиля"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                # Проверяем, существует ли трекер
-                async with db.execute(
-                    "SELECT is_active FROM building_trackers WHERE telegram_id = ? AND player_tag = ?",
-                    (telegram_id, player_tag)
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    
-                    if row:
-                        # Переключаем состояние
-                        new_state = not bool(row[0])
-                        await db.execute(
-                            "UPDATE building_trackers SET is_active = ? WHERE telegram_id = ? AND player_tag = ?",
-                            (int(new_state), telegram_id, player_tag)
-                        )
-                    else:
-                        # Создаем новый трекер
-                        tracker = BuildingTracker(
-                            telegram_id=telegram_id,
-                            player_tag=player_tag,
-                            is_active=True,
-                            created_at=datetime.now().isoformat()
-                        )
-                        await db.execute("""
-                            INSERT INTO building_trackers 
-                            (telegram_id, player_tag, is_active, created_at, last_check)
-                            VALUES (?, ?, ?, ?, ?)
-                        """, (tracker.telegram_id, tracker.player_tag, int(tracker.is_active), 
-                              tracker.created_at, tracker.last_check))
-                    
-                    await db.commit()
-                    return True
-        except Exception as e:
-            logger.error(f"Ошибка при переключении отслеживания: {e}")
-            return False
-    
+        tracker = await self.get_building_tracker_for_profile(telegram_id, player_tag)
+        if tracker:
+            await self.building_trackers.update_one(
+                {"telegram_id": telegram_id, "player_tag": player_tag},
+                {"$set": {"is_active": not tracker.is_active}},
+            )
+            return True
+        tracker = BuildingTracker(
+            telegram_id=telegram_id,
+            player_tag=player_tag,
+            is_active=True,
+            created_at=datetime.now().isoformat(),
+        )
+        return await self.save_building_tracker(tracker)
+
     async def get_active_building_trackers(self) -> List[BuildingTracker]:
-        """Получение всех активных отслеживателей зданий"""
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(
-                "SELECT telegram_id, player_tag, is_active, created_at, last_check FROM building_trackers WHERE is_active = 1"
-            ) as cursor:
-                rows = await cursor.fetchall()
-                return [BuildingTracker(
-                    telegram_id=row[0],
-                    player_tag=row[1], 
-                    is_active=bool(row[2]),
-                    created_at=row[3],
-                    last_check=row[4]
-                ) for row in rows]
-    
+        trackers: List[BuildingTracker] = []
+        async for doc in self.building_trackers.find({"is_active": True}):
+            trackers.append(
+                BuildingTracker(
+                    telegram_id=doc["telegram_id"],
+                    player_tag=doc.get("player_tag", ""),
+                    is_active=True,
+                    created_at=doc.get("created_at"),
+                    last_check=doc.get("last_check"),
+                )
+            )
+        return trackers
+
     async def save_building_snapshot(self, snapshot: BuildingSnapshot) -> bool:
-        """Сохранение снимка состояния зданий"""
         try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute("""
-                    INSERT OR REPLACE INTO building_snapshots 
-                    (player_tag, snapshot_time, buildings_data)
-                    VALUES (?, ?, ?)
-                """, (snapshot.player_tag, snapshot.snapshot_time, snapshot.buildings_data))
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении снимка зданий: {e}")
+            await self.building_snapshots.update_one(
+                {"player_tag": snapshot.player_tag, "snapshot_time": snapshot.snapshot_time},
+                {
+                    "$set": {
+                        "player_tag": snapshot.player_tag,
+                        "snapshot_time": snapshot.snapshot_time,
+                        "buildings_data": snapshot.buildings_data,
+                    }
+                },
+                upsert=True,
+            )
+            return True
+        except PyMongoError as exc:
+            logger.error("Ошибка при сохранении снимка зданий: %s", exc)
             return False
-    
+
     async def get_latest_building_snapshot(self, player_tag: str) -> Optional[BuildingSnapshot]:
-        """Получение последнего снимка зданий игрока"""
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(
-                "SELECT player_tag, snapshot_time, buildings_data FROM building_snapshots WHERE player_tag = ? ORDER BY snapshot_time DESC LIMIT 1",
-                (player_tag,)
-            ) as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    return BuildingSnapshot(
-                        player_tag=row[0],
-                        snapshot_time=row[1],
-                        buildings_data=row[2]
-                    )
-                return None
-    
+        doc = await self.building_snapshots.find_one(
+            {"player_tag": player_tag},
+            sort=[("snapshot_time", DESCENDING)],
+        )
+        if doc:
+            return BuildingSnapshot(
+                player_tag=doc.get("player_tag", ""),
+                snapshot_time=doc.get("snapshot_time", ""),
+                buildings_data=doc.get("buildings_data", ""),
+            )
+        return None
+
     async def update_tracker_last_check(self, telegram_id: int, last_check: str, player_tag: str = None) -> bool:
-        """Обновление времени последней проверки отслеживателя"""
+        query: Dict[str, Any] = {"telegram_id": telegram_id}
+        if player_tag:
+            query["player_tag"] = player_tag
         try:
-            async with aiosqlite.connect(self.db_path) as db:
-                if player_tag:
-                    # Обновляем для конкретного профиля
-                    await db.execute(
-                        "UPDATE building_trackers SET last_check = ? WHERE telegram_id = ? AND player_tag = ?",
-                        (last_check, telegram_id, player_tag)
-                    )
-                else:
-                    # Обновляем для всех профилей пользователя (для обратной совместимости)
-                    await db.execute(
-                        "UPDATE building_trackers SET last_check = ? WHERE telegram_id = ?",
-                        (last_check, telegram_id)
-                    )
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при обновлении времени проверки: {e}")
+            await self.building_trackers.update_many(query, {"$set": {"last_check": last_check}})
+            return True
+        except PyMongoError as exc:
+            logger.error("Ошибка при обновлении времени проверки: %s", exc)
             return False
-    
-    # Методы для работы с привязанными кланами
+
+    # ------------------------------------------------------------------
+    # Linked clans
+    # ------------------------------------------------------------------
     async def get_linked_clans(self, telegram_id: int) -> List[LinkedClan]:
-        """Получение всех привязанных кланов пользователя"""
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute(
-                    "SELECT id, telegram_id, clan_tag, clan_name, slot_number, created_at "
-                    "FROM linked_clans WHERE telegram_id = ? ORDER BY slot_number",
-                    (telegram_id,)
-                ) as cursor:
-                    rows = await cursor.fetchall()
-                    return [LinkedClan(
-                        id=row[0],
-                        telegram_id=row[1],
-                        clan_tag=row[2],
-                        clan_name=row[3],
-                        slot_number=row[4],
-                        created_at=row[5]
-                    ) for row in rows]
-        except Exception as e:
-            logger.error(f"Ошибка при получении привязанных кланов: {e}")
-            return []
-    
+        clans: List[LinkedClan] = []
+        cursor = self.linked_clans.find({"telegram_id": telegram_id}).sort("slot_number", ASCENDING)
+        async for doc in cursor:
+            clans.append(
+                LinkedClan(
+                    telegram_id=doc["telegram_id"],
+                    clan_tag=doc.get("clan_tag", ""),
+                    clan_name=doc.get("clan_name", ""),
+                    slot_number=doc.get("slot_number", 0),
+                    created_at=doc.get("created_at"),
+                    id=str(doc.get("_id")),
+                )
+            )
+        return clans
+
     async def save_linked_clan(self, linked_clan: LinkedClan) -> bool:
-        """Сохранение привязанного клана"""
         try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute(
-                    "INSERT OR REPLACE INTO linked_clans "
-                    "(telegram_id, clan_tag, clan_name, slot_number, created_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (linked_clan.telegram_id, linked_clan.clan_tag, linked_clan.clan_name,
-                     linked_clan.slot_number, linked_clan.created_at)
-                )
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении привязанного клана: {e}")
+            await self.linked_clans.update_one(
+                {"telegram_id": linked_clan.telegram_id, "slot_number": linked_clan.slot_number},
+                {
+                    "$set": {
+                        "telegram_id": linked_clan.telegram_id,
+                        "clan_tag": linked_clan.clan_tag,
+                        "clan_name": linked_clan.clan_name,
+                        "slot_number": linked_clan.slot_number,
+                        "created_at": linked_clan.created_at,
+                    }
+                },
+                upsert=True,
+            )
+            return True
+        except PyMongoError as exc:
+            logger.error("Ошибка при сохранении привязанного клана: %s", exc)
             return False
-    
+
     async def delete_linked_clan(self, telegram_id: int, slot_number: int) -> bool:
-        """Удаление привязанного клана по номеру слота"""
         try:
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute(
-                    "DELETE FROM linked_clans WHERE telegram_id = ? AND slot_number = ?",
-                    (telegram_id, slot_number)
-                )
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при удалении привязанного клана: {e}")
+            await self.linked_clans.delete_one({"telegram_id": telegram_id, "slot_number": slot_number})
+            return True
+        except PyMongoError as exc:
+            logger.error("Ошибка при удалении привязанного клана: %s", exc)
             return False
-    
+
     async def get_max_linked_clans_for_user(self, telegram_id: int) -> int:
-        """Получение максимального количества привязанных кланов для пользователя"""
         try:
             subscription = await self.get_subscription(telegram_id)
             if subscription and subscription.is_active and not subscription.is_expired():
-                if subscription.subscription_type in ["proplus", "proplus_permanent"]:
-                    return 5  # Pro Plus
-                elif subscription.subscription_type in ["premium"]:
-                    return 3  # Premium
-            return 1  # Regular user
-        except Exception as e:
-            logger.error(f"Ошибка при получении лимита привязанных кланов: {e}")
-            return 1
-    
-    # Методы для работы с запросами на сканирование войн
+                if subscription.subscription_type in {"proplus", "proplus_permanent"}:
+                    return 5
+                if subscription.subscription_type in {"premium"}:
+                    return 3
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error("Ошибка при получении лимита привязанных кланов: %s", exc)
+        return 1
+
+    # ------------------------------------------------------------------
+    # War scan requests
+    # ------------------------------------------------------------------
     async def can_request_war_scan(self, telegram_id: int) -> bool:
-        """Проверка, может ли пользователь запросить сканирование войн (1 успешный запрос в день)"""
+        today = datetime.now().date().isoformat()
+        count = await self.war_scan_requests.count_documents(
+            {"telegram_id": telegram_id, "request_date": today, "status": "success"}
+        )
+        return count == 0
+
+    async def save_war_scan_request(
+        self,
+        telegram_id: int,
+        clan_tag: str,
+        status: str,
+        wars_added: int = 0,
+        request_type: str = "manual",
+    ) -> bool:
         try:
-            today = datetime.now().date().isoformat()
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute(
-                    "SELECT COUNT(*) FROM war_scan_requests "
-                    "WHERE telegram_id = ? AND request_date = ? AND status = 'success'",
-                    (telegram_id, today)
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    count = row[0] if row else 0
-                    return count == 0
-        except Exception as e:
-            logger.error(f"Ошибка при проверке лимита запросов сканирования: {e}")
+            await self.war_scan_requests.insert_one(
+                {
+                    "telegram_id": telegram_id,
+                    "clan_tag": clan_tag,
+                    "request_type": request_type,
+                    "request_date": datetime.now().date().isoformat(),
+                    "status": status,
+                    "wars_added": wars_added,
+                    "created_at": datetime.now(),
+                }
+            )
+            return True
+        except PyMongoError as exc:
+            logger.error("Ошибка при сохранении запроса сканирования: %s", exc)
             return False
-    
-    async def save_war_scan_request(self, telegram_id: int, clan_tag: str, status: str, wars_added: int = 0, request_type: str = "manual") -> bool:
-        """Сохранение запроса на сканирование войн"""
-        try:
-            today = datetime.now().date().isoformat()
-            created_at = datetime.now().isoformat()
-            async with aiosqlite.connect(self.db_path) as db:
-                await db.execute(
-                    "INSERT INTO war_scan_requests "
-                    "(telegram_id, clan_tag, request_type, request_date, status, wars_added, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (telegram_id, clan_tag, request_type, today, status, wars_added, created_at)
-                )
-                await db.commit()
-                return True
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении запроса сканирования: {e}")
-            return False
-    
+
     async def get_war_scan_requests_today(self, telegram_id: int) -> int:
-        """Получение количества успешных запросов на сканирование за сегодня"""
-        try:
-            today = datetime.now().date().isoformat()
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute(
-                    "SELECT COUNT(*) FROM war_scan_requests "
-                    "WHERE telegram_id = ? AND request_date = ? AND status = 'success'",
-                    (telegram_id, today)
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    return row[0] if row else 0
-        except Exception as e:
-            logger.error(f"Ошибка при получении количества запросов: {e}")
-            return 0
+        today = datetime.now().date().isoformat()
+        return await self.war_scan_requests.count_documents(
+            {"telegram_id": telegram_id, "request_date": today, "status": "success"}
+        )
+
+
+__all__ = ["DatabaseService"]

@@ -72,7 +72,7 @@ echo "------------------------"
 
 # Проверяем в системном Python
 echo "В системном Python3:"
-for package in telegram aiosqlite aiohttp; do
+for package in telegram motor pymongo aiohttp; do
     if python3 -c "import $package" 2>/dev/null; then
         echo "  ✅ $package"
     else
@@ -84,7 +84,7 @@ echo ""
 # Если есть активное venv, проверяем в нем
 if [ -n "$VIRTUAL_ENV" ]; then
     echo "В активном виртуальном окружении ($VIRTUAL_ENV):"
-    for package in telegram aiosqlite aiohttp; do
+    for package in telegram motor pymongo aiohttp; do
         if python -c "import $package" 2>/dev/null; then
             echo "  ✅ $package"
         else

@@ -34,7 +34,7 @@ if not os.getenv('BOT_TOKEN'):
 if not os.getenv('BOT_USERNAME'):
     os.environ['BOT_USERNAME'] = 'DUMMY_USERNAME'
 
-from src.services.nosql_database import NoSQLDatabaseService as DatabaseService
+from src.services.database import DatabaseService
 from src.models.war import WarToSave
 from config.config import config
 
@@ -54,13 +54,16 @@ class UltraClanScanner:
     """УЛЬТРА СКАНЕР - Сканирует МИЛЛИОНЫ кланов с максимальной скоростью"""
     
     def __init__(self):
-        # Определяем абсолютный путь к базе данных в корневой папке проекта
+        # Инициализируем подключение к MongoDB
         current_dir = os.path.dirname(os.path.abspath(__file__))
         parent_dir = os.path.dirname(current_dir)
-        db_path = os.path.join(parent_dir, 'clashbot.db')
-        
-        logger.info(f"🗄️ Путь к базе данных: {db_path}")
-        self.db_service = DatabaseService(db_path=db_path)
+
+        self.db_service = DatabaseService()
+        logger.info(
+            "🗄️ Подключение к MongoDB: %s/%s",
+            getattr(self.db_service, "mongo_uri", "<unknown>"),
+            getattr(self.db_service, "db_name", "clashbot"),
+        )
         
         # Статистика
         self.total_clans_found = 0
@@ -841,27 +844,21 @@ async def main():
     logger.info(f"📁 Корневая папка проекта: {parent_dir}")
     
     # Проверка базы данных
-    db_path = os.path.join(parent_dir, 'clashbot.db')
-    logger.info(f"🗄️ Ожидаемый путь к БД: {db_path}")
-    
-    if os.path.exists(db_path):
-        logger.info("✅ База данных найдена")
-        if os.access(db_path, os.R_OK):
-            logger.info("✅ База данных доступна для чтения")
-        else:
-            logger.error("❌ Нет прав на чтение базы данных")
-            sys.exit(1)
-        if os.access(db_path, os.W_OK):
-            logger.info("✅ База данных доступна для записи")
-        else:
-            logger.error("❌ Нет прав на запись в базу данных")
-            sys.exit(1)
-    else:
-        logger.warning("⚠️ База данных не найдена, будет создана автоматически")
-        # Проверяем права на создание файлов в корневой папке
-        if not os.access(parent_dir, os.W_OK):
-            logger.error(f"❌ Нет прав на создание БД в папке: {parent_dir}")
-            sys.exit(1)
+    logger.info("🗄️ Проверка подключения к MongoDB...")
+    db_service = DatabaseService()
+    logger.info(
+        "🗄️ Используем MongoDB: %s/%s",
+        getattr(db_service, "mongo_uri", "<unknown>"),
+        getattr(db_service, "db_name", "clashbot"),
+    )
+    try:
+        await db_service.ping()
+        logger.info("✅ Подключение к MongoDB успешно")
+    except Exception as exc:
+        logger.error("❌ Не удалось подключиться к MongoDB: %s", exc)
+        sys.exit(1)
+    finally:
+        db_service.client.close()
     
     # Проверка наличия обязательных токенов
     if not config.COC_API_TOKEN or config.COC_API_TOKEN == '':

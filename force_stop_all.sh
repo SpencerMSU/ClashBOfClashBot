@@ -44,46 +44,37 @@ else
     echo "✅ Процессы Python не найдены"
 fi
 
-# Освобождение блокировок базы данных
+# Проверка состояния MongoDB
 echo ""
-echo "🔓 Освобождение блокировок базы данных..."
+echo "🔓 Проверка состояния MongoDB..."
 
-if [ -f "clashbot.db" ]; then
-    # Проверка блокировок
-    if command -v lsof >/dev/null 2>&1; then
-        DB_LOCKS=$(lsof clashbot.db 2>/dev/null)
-        if [ -n "$DB_LOCKS" ]; then
-            echo "⚠️ База данных все еще заблокирована:"
-            echo "$DB_LOCKS"
-            
-            # Попытка принудительно освободить
-            DB_PIDS=$(lsof -t clashbot.db 2>/dev/null)
-            for PID in $DB_PIDS; do
-                echo "🛑 Принудительное освобождение БД от процесса $PID..."
-                kill -KILL "$PID" 2>/dev/null
-            done
-        else
-            echo "✅ База данных свободна от блокировок"
-        fi
-    fi
-    
-    # Проверка файлов WAL и SHM (SQLite)
-    if [ -f "clashbot.db-wal" ] || [ -f "clashbot.db-shm" ]; then
-        echo "🧹 Очистка временных файлов SQLite..."
-        rm -f clashbot.db-wal clashbot.db-shm 2>/dev/null
-        echo "✅ Временные файлы очищены"
-    fi
-    
-    # Тест доступа к БД
-    echo "🧪 Проверка доступа к базе данных..."
-    sqlite3 clashbot.db "SELECT COUNT(*) FROM sqlite_master;" >/dev/null 2>&1 && {
-        echo "✅ База данных доступна"
-    } || {
-        echo "❌ База данных недоступна или повреждена"
-    }
-else
-    echo "⚠️ clashbot.db не найден"
-fi
+python3 - <<'PY'
+import asyncio
+import sys
+
+sys.path.insert(0, '.')
+
+try:
+    from src.services.database import DatabaseService
+except RuntimeError as exc:
+    print(f"❌ {exc}")
+    sys.exit(1)
+
+async def main():
+    db_service = DatabaseService()
+    print('🗄️ MongoDB URI:', getattr(db_service, 'mongo_uri', '<unknown>'))
+    print('🗄️ База данных:', getattr(db_service, 'db_name', '<unknown>'))
+
+    try:
+        await db_service.ping()
+        print('✅ Подключение к MongoDB активно')
+    except Exception as exc:
+        print('❌ Ошибка подключения к MongoDB:', exc)
+    finally:
+        db_service.client.close()
+
+asyncio.run(main())
+PY
 
 echo ""
 echo "✅ Все процессы остановлены, блокировки сняты"
