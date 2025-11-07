@@ -2,6 +2,15 @@
 
 ## 📋 Current Project Analysis
 
+### 🆕 Infrastructure Quality of Life (Linux MongoDB Auto-Start)
+
+- ✅ Added `scripts/start_mongodb.sh` to automatically bootstrap a local MongoDB daemon when the bot starts on Linux servers.
+- ✅ Updated `start_clash_bot.sh` to invoke the helper script, removing the need for manual `mongod` management on virtual machines.
+- ✅ MongoDB data is stored under `data/mongodb`, with logs written to `logs/mongodb.log` for easier diagnostics.
+- ✅ The script safely exits with a descriptive message if `mongod` is not installed, guiding operators to install MongoDB or supply a remote `MONGODB_URI`.
+
+These improvements address the "Connection refused" errors that previously occurred on Linux hosts where MongoDB was not started manually.
+
 ### 🏗️ Architecture Overview
 
 **Current Codebase Statistics:**
