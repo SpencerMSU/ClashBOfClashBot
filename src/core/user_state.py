@@ -1,6 +1,4 @@
-"""
-Состояния пользователя - аналог Java UserState
-"""
+"""Состояния пользователя - аналог Java UserState"""
 from enum import Enum
 
 
@@ -12,4 +10,3 @@ class UserState(Enum):
     AWAITING_CLAN_TAG_TO_LINK = "awaiting_clan_tag_to_link"
     AWAITING_NOTIFICATION_TIME = "awaiting_notification_time"
     AWAITING_PLAYER_TAG_TO_ADD_PROFILE = "awaiting_player_tag_to_add_profile"
-    AWAITING_CLAN_TAG_FOR_WAR_SCAN = "awaiting_clan_tag_for_war_scan"
