@@ -66,7 +66,7 @@ class BotConfig:
         self._validate_config()
 
     @staticmethod
-    def _resolve_database_path(database_path: str) -> str:
+555    def _resolve_database_path(database_path: str) -> str:
         if not database_path:
             database_path = 'clashbot.db'
         path = Path(database_path)
