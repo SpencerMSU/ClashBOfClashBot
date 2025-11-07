@@ -49,4 +49,4 @@ fi
 
 echo ""
 echo "✅ Теперь можно безопасно запустить бота!"
-echo "Выполните: ./start_bot_linux.sh"
+echo "Выполните: ./start_clash_bot.sh"

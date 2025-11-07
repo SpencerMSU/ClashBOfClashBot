@@ -45,6 +45,7 @@ ClashBOfClashBot/
 ├── 📁 scripts/                     # Скрипты и утилиты
 │   ├── all_importer.py             # Импортер всех кланов
 │   ├── errors.py                   # Обработчик ошибок
+│   ├── start_mongodb.sh            # Автозапуск локальной MongoDB (Linux)
 │   ├── validate.py                 # Валидация компонентов
 │   └── validate_importer.py        # Валидация импортера
 ├── 📁 tests/                       # Тесты
