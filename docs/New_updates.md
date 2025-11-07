@@ -23,8 +23,8 @@
 - Comprehensive error handling
 
 #### 3. **Database Layer (923 lines)**
-- `DatabaseService` - SQLite/PostgreSQL support
-- **10 core tables** for complete data management:
+- `DatabaseService` - MongoDB support
+- **Основные коллекции** для полного управления данными:
   - `users` - User accounts and preferences
   - `user_profiles` - Multi-profile support (Premium)
   - `wars` - Clan war history and analytics

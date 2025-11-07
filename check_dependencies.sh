@@ -41,7 +41,7 @@ except Exception as e:
 echo ""
 echo "📋 Проверка остальных зависимостей..."
 
-DEPS=("asyncio")
+DEPS=("asyncio" "motor" "pymongo")
 for dep in "${DEPS[@]}"; do
     python -c "import $dep; print(f'✅ $dep: OK')" 2>/dev/null || {
         echo "❌ $dep не найден, устанавливаем..."

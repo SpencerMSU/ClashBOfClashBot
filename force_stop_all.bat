@@ -24,18 +24,34 @@ for /f "tokens=2" %%i in ('tasklist /fi "imagename eq python3.exe" /fo csv /nh 2
 )
 
 echo.
-echo 🔓 Освобождение блокировок базы данных...
+echo 🔓 Проверка подключения к MongoDB...
+python - <<"PY"
+import asyncio
+import sys
+import os
 
-REM Удаление временных файлов SQLite
-if exist "clashbot.db-wal" (
-    echo 🧹 Удаление clashbot.db-wal
-    del /f "clashbot.db-wal" >nul 2>&1
-)
+sys.path.insert(0, os.path.dirname(__file__))
 
-if exist "clashbot.db-shm" (
-    echo 🧹 Удаление clashbot.db-shm
-    del /f "clashbot.db-shm" >nul 2>&1
-)
+try:
+    from src.services.database import DatabaseService
+except RuntimeError as exc:
+    print(f"❌ {exc}")
+    sys.exit(1)
+
+async def main():
+    db_service = DatabaseService()
+    print('🗄️ MongoDB URI:', getattr(db_service, 'mongo_uri', '<unknown>'))
+    print('🗄️ База данных:', getattr(db_service, 'db_name', '<unknown>'))
+    try:
+        await db_service.ping()
+        print('✅ Подключение к MongoDB активно')
+    except Exception as exc:
+        print('❌ Ошибка подключения к MongoDB:', exc)
+    finally:
+        db_service.client.close()
+
+asyncio.run(main())
+PY
 
 echo.
 echo ✅ Все процессы остановлены, блокировки сняты

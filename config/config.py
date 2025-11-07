@@ -51,7 +51,8 @@ class BotConfig:
         self.YOOKASSA_SECRET_KEY: str = api_tokens.get('YOOKASSA_SECRET_KEY', '') or os.getenv('YOOKASSA_SECRET_KEY', '')
         
         # Настройки базы данных
-        self.DATABASE_PATH: str = os.getenv('DATABASE_PATH', 'clashbot.db')
+        self.MONGODB_URI: str = os.getenv('MONGODB_URI', 'mongodb://localhost:27017')
+        self.MONGODB_DB_NAME: str = os.getenv('MONGODB_DB_NAME', 'clashbot')
         
         # Настройки клана
         self.OUR_CLAN_TAG: str = os.getenv('OUR_CLAN_TAG', '#2PQU0PLJ2')

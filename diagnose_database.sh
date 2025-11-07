@@ -1,107 +1,65 @@
 #!/bin/bash
 
-# Диагностика проблем с базой данных ClashBot
+# Диагностика MongoDB для ClashBot
 
-echo "🔍 Диагностика базы данных..."
+echo "🔍 Диагностика MongoDB..."
 
 cd "$(dirname "$0")"
 
 echo "📁 Текущая папка: $(pwd)"
-echo "📁 Содержимое папки:"
-ls -la
 
 echo ""
-echo "🔍 Поиск clashbot.db:"
-find . -name "clashbot.db" -type f 2>/dev/null || echo "❌ clashbot.db не найден"
+echo "🌐 Проверка переменных окружения:"
+echo "   MONGODB_URI=${MONGODB_URI:-'не задан'}"
+echo "   MONGODB_DB_NAME=${MONGODB_DB_NAME:-'не задан'}"
 
 echo ""
-echo "📊 Проверка прав доступа:"
-if [ -f "clashbot.db" ]; then
-    ls -la clashbot.db
-    
-    # Проверка возможности чтения
-    if [ -r "clashbot.db" ]; then
-        echo "✅ Чтение: разрешено"
-    else
-        echo "❌ Чтение: запрещено"
-    fi
-    
-    # Проверка возможности записи
-    if [ -w "clashbot.db" ]; then
-        echo "✅ Запись: разрешена"
-    else
-        echo "❌ Запись: запрещена"
-        echo "💡 Исправление: chmod 666 clashbot.db"
-    fi
-    
-    # Проверка блокировок
-    if lsof clashbot.db 2>/dev/null; then
-        echo "⚠️ База данных используется другим процессом!"
-        lsof clashbot.db
-    else
-        echo "✅ База данных свободна"
-    fi
-    
-    # Проверка целостности БД
-    echo ""
-    echo "🔧 Проверка целостности:"
-    sqlite3 clashbot.db "PRAGMA integrity_check;" 2>/dev/null || {
-        echo "❌ Ошибка доступа к SQLite"
-        echo "💡 Убедитесь что sqlite3 установлен"
-    }
-    
-else
-    echo "❌ clashbot.db не найден в $(pwd)"
-    echo ""
-    echo "🔧 Создание базы данных..."
-    
-    # Проверка прав на создание файлов
-    touch test_file 2>/dev/null && {
-        echo "✅ Права на создание файлов: есть"
-        rm test_file
-    } || {
-        echo "❌ Права на создание файлов: отсутствуют"
-        echo "💡 Исправление: chmod 755 $(pwd)"
-    }
-fi
+echo "🐍 Проверка подключения через Python..."
 
-echo ""
-echo "🐍 Проверка Python доступа к БД:"
-python3 -c "
-import sqlite3
+python3 - <<'PY'
+import asyncio
 import os
+import sys
 
-db_path = 'clashbot.db'
-print(f'📍 Проверяемый путь: {os.path.abspath(db_path)}')
+sys.path.insert(0, '.')
 
 try:
-    # Попытка подключения
-    conn = sqlite3.connect(db_path)
-    print('✅ SQLite подключение: успешно')
-    
-    # Проверка записи
-    conn.execute('CREATE TABLE IF NOT EXISTS test_table (id INTEGER)')
-    conn.execute('INSERT INTO test_table (id) VALUES (1)')
-    conn.commit()
-    print('✅ Запись в БД: успешно')
-    
-    # Проверка чтения
-    cursor = conn.execute('SELECT COUNT(*) FROM test_table')
-    count = cursor.fetchone()[0]
-    print(f'✅ Чтение из БД: успешно (записей: {count})')
-    
-    # Очистка тестовых данных
-    conn.execute('DROP TABLE test_table')
-    conn.commit()
-    conn.close()
-    print('✅ Тест БД завершен успешно')
-    
-except Exception as e:
-    print(f'❌ Ошибка Python SQLite: {e}')
-" 2>/dev/null || echo "❌ Python или sqlite3 недоступны"
+    from src.services.database import DatabaseService
+except RuntimeError as exc:
+    print(f"❌ {exc}")
+    sys.exit(1)
 
-echo ""
-echo "🎯 Рекомендации:"
-echo "1. База данных должна быть в корневой папке проекта"
-echo "2. Запускайте скрипты из корневой папки: cd /root/ClashBOfClashBot"
-echo "3. Используйте: python scripts/all_importer.py"
+async def diagnose():
+    db_service = DatabaseService()
+    print('🗄️ MongoDB URI:', getattr(db_service, 'mongo_uri', '<unknown>'))
+    print('🗄️ База данных:', getattr(db_service, 'db_name', '<unknown>'))
+
+    try:
+        await db_service.ping()
+        print('✅ Подключение к MongoDB успешно')
+    except Exception as exc:
+        print('❌ Ошибка подключения:', exc)
+        raise
+
+    collections = await db_service.db.list_collection_names()
+    if not collections:
+        print('⚠️ В базе данных пока нет коллекций')
+    else:
+        print('\n📚 Статистика коллекций:')
+        for name in sorted(collections):
+            count = await db_service.db[name].estimated_document_count()
+            print(f"   • {name}: {count} документ(ов)")
+
+    db_service.client.close()
+
+asyncio.run(diagnose())
+PY
+
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "🎉 Диагностика завершена"
+else
+    echo ""
+    echo "❌ Диагностика завершилась с ошибкой"
+    exit 1
+fi
