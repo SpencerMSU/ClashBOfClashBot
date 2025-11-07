@@ -1,18 +1,14 @@
-"""MongoDB-backed database service for the ClashBot project."""
+"""PostgreSQL-backed database service for the ClashBot project."""
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 try:
-    from motor.motor_asyncio import AsyncIOMotorClient
+    import asyncpg
 except ImportError as exc:  # pragma: no cover - environment specific
     raise RuntimeError(
-        "The 'motor' package is required to use the MongoDB database service. "
-        "Install it with 'pip install motor'."
+        "Пакет 'asyncpg' обязателен для работы с PostgreSQL. Установите его командой 'pip install asyncpg'."
     ) from exc
-
-from pymongo import ASCENDING, DESCENDING, UpdateOne
-from pymongo.errors import PyMongoError
 
 from config.config import config
 from src.models.building import BuildingSnapshot, BuildingTracker
@@ -25,83 +21,207 @@ from src.models.war import WarToSave
 logger = logging.getLogger(__name__)
 
 
+def _timestamp_to_iso(value: Optional[datetime]) -> Optional[str]:
+
+
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if value is None:
+        return None
+    return str(value)
+
+
 class DatabaseService:
-    """Database abstraction layer implemented on top of MongoDB."""
+    """Database abstraction layer implemented on top of PostgreSQL."""
 
-    def __init__(self, mongo_uri: str = None, db_name: str = None):
-        self.mongo_uri = mongo_uri or getattr(config, "MONGODB_URI", "mongodb://localhost:27017")
-        self.db_name = db_name or getattr(config, "MONGODB_DB_NAME", "clashbot")
+    def __init__(self, database_url: str = None):
+        self.database_url = database_url or getattr(config, "DATABASE_URL", "")
+        if not self.database_url:
+            raise RuntimeError("DATABASE_URL не настроен в конфигурации")
+        self.pool: Optional[asyncpg.pool.Pool] = None
 
-        self.client = AsyncIOMotorClient(self.mongo_uri)
-        self.db = self.client[self.db_name]
+    async def _ensure_pool(self) -> asyncpg.pool.Pool:
+        if not self.pool:
+            try:
+                self.pool = await asyncpg.create_pool(self.database_url, min_size=1, max_size=5)
+            except Exception as exc:  # pragma: no cover - depends on environment
+                logger.error("❌ Не удалось подключиться к PostgreSQL: %s", exc)
+                raise
+        return self.pool
 
-        # Shortcuts for frequently used collections
-        self.users = self.db["users"]
-        self.user_profiles = self.db["user_profiles"]
-        self.wars = self.db["wars"]
-        self.subscriptions = self.db["subscriptions"]
-        self.notifications = self.db["notifications"]
-        self.building_trackers = self.db["building_trackers"]
-        self.building_snapshots = self.db["building_snapshots"]
-        self.player_stats_snapshots = self.db["player_stats_snapshots"]
-        self.linked_clans = self.db["linked_clans"]
-        self.war_scan_requests = self.db["war_scan_requests"]
-        self.cwl_seasons = self.db["cwl_seasons"]
-
-        logger.info("🔗 DatabaseService initialised for MongoDB URI %s, database '%s'", self.mongo_uri, self.db_name)
+    async def close(self):
+        if self.pool:
+            await self.pool.close()
+            self.pool = None
 
     async def ping(self) -> bool:
-        """Ping the MongoDB deployment to ensure the connection works."""
-        try:
-            await self.client.admin.command("ping")
-            return True
-        except Exception as exc:  # pragma: no cover - network failure specific
-            logger.error("❌ MongoDB ping failed: %s", exc)
-            raise
+        """Ping the PostgreSQL deployment to ensure the connection works."""
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            try:
+                await conn.execute("SELECT 1")
+                return True
+            except Exception as exc:  # pragma: no cover - network failure specific
+                logger.error("❌ PostgreSQL ping failed: %s", exc)
+                raise
 
     async def init_db(self):
-        """Initialise MongoDB collections and indexes used by the bot."""
-        logger.info("🛠️ Ensuring MongoDB indexes are created")
-        try:
-            await self.ping()
+        """Initialise PostgreSQL tables used by the bot."""
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    telegram_id BIGINT PRIMARY KEY,
+                    player_tag TEXT
+                )
+                """
+            )
 
-            await self.users.create_index("telegram_id", unique=True)
-            await self.users.create_index("player_tag", unique=True, sparse=True)
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_profiles (
+                    id SERIAL PRIMARY KEY,
+                    telegram_id BIGINT NOT NULL,
+                    player_tag TEXT NOT NULL,
+                    profile_name TEXT,
+                    is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    UNIQUE (telegram_id, player_tag)
+                )
+                """
+            )
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_profiles_telegram ON user_profiles(telegram_id)")
 
-            await self.user_profiles.create_index([("telegram_id", ASCENDING), ("player_tag", ASCENDING)], unique=True)
-            await self.user_profiles.create_index([("telegram_id", ASCENDING), ("is_primary", DESCENDING), ("created_at", ASCENDING)])
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS wars (
+                    end_time TEXT PRIMARY KEY,
+                    opponent_name TEXT,
+                    team_size INTEGER,
+                    clan_stars INTEGER,
+                    opponent_stars INTEGER,
+                    clan_destruction REAL,
+                    opponent_destruction REAL,
+                    clan_attacks_used INTEGER,
+                    result TEXT,
+                    is_cwl_war BOOLEAN DEFAULT FALSE,
+                    total_violations INTEGER,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+                """
+            )
 
-            await self.wars.create_index("end_time", unique=True)
-            await self.wars.create_index("is_cwl_war")
-            await self.wars.create_index("created_at")
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS war_attacks (
+                    id SERIAL PRIMARY KEY,
+                    war_end_time TEXT NOT NULL REFERENCES wars(end_time) ON DELETE CASCADE,
+                    attacker_tag TEXT,
+                    attacker_name TEXT,
+                    defender_tag TEXT,
+                    stars INTEGER,
+                    destruction REAL,
+                    attack_order INTEGER,
+                    timestamp BIGINT,
+                    is_violation BOOLEAN
+                )
+                """
+            )
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_war_attacks_war ON war_attacks(war_end_time)")
 
-            await self.subscriptions.create_index("telegram_id", unique=True)
-            await self.subscriptions.create_index("end_date")
-            await self.subscriptions.create_index("is_active")
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    telegram_id BIGINT PRIMARY KEY,
+                    subscription_type TEXT,
+                    start_date TIMESTAMP,
+                    end_date TIMESTAMP,
+                    is_active BOOLEAN,
+                    payment_id TEXT,
+                    amount NUMERIC,
+                    currency TEXT,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+                """
+            )
 
-            await self.notifications.create_index("telegram_id", unique=True)
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notifications (
+                    telegram_id BIGINT PRIMARY KEY,
+                    enabled_at TIMESTAMP NOT NULL
+                )
+                """
+            )
 
-            await self.building_trackers.create_index([("telegram_id", ASCENDING), ("player_tag", ASCENDING)], unique=True)
-            await self.building_trackers.create_index("is_active")
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS building_trackers (
+                    id SERIAL PRIMARY KEY,
+                    telegram_id BIGINT NOT NULL,
+                    player_tag TEXT NOT NULL,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    last_check TIMESTAMP,
+                    UNIQUE (telegram_id, player_tag)
+                )
+                """
+            )
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_building_trackers_active ON building_trackers(is_active)")
 
-            await self.building_snapshots.create_index([("player_tag", ASCENDING), ("snapshot_time", DESCENDING)], unique=True)
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS building_snapshots (
+                    id SERIAL PRIMARY KEY,
+                    player_tag TEXT NOT NULL,
+                    snapshot_time TEXT NOT NULL,
+                    buildings_data TEXT,
+                    UNIQUE (player_tag, snapshot_time)
+                )
+                """
+            )
 
-            await self.player_stats_snapshots.create_index([("player_tag", ASCENDING), ("snapshot_time", ASCENDING)])
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS player_stats_snapshots (
+                    id SERIAL PRIMARY KEY,
+                    player_tag TEXT NOT NULL,
+                    snapshot_time TEXT NOT NULL,
+                    donations INTEGER,
+                    UNIQUE (player_tag, snapshot_time)
+                )
+                """
+            )
 
-            await self.linked_clans.create_index([("telegram_id", ASCENDING), ("slot_number", ASCENDING)], unique=True)
-            await self.linked_clans.create_index([("telegram_id", ASCENDING), ("clan_tag", ASCENDING)], unique=True)
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS linked_clans (
+                    id SERIAL PRIMARY KEY,
+                    telegram_id BIGINT NOT NULL,
+                    clan_tag TEXT NOT NULL,
+                    clan_name TEXT,
+                    slot_number INTEGER NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    UNIQUE (telegram_id, slot_number),
+                    UNIQUE (telegram_id, clan_tag)
+                )
+                """
+            )
 
-            await self.war_scan_requests.create_index("telegram_id")
-            await self.war_scan_requests.create_index("request_date")
-            await self.war_scan_requests.create_index("status")
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cwl_seasons (
+                    id SERIAL PRIMARY KEY,
+                    season_date TEXT UNIQUE,
+                    bonus_results_json TEXT
+                )
+                """
+            )
 
-            await self.cwl_seasons.create_index("season_date", unique=True)
-
-            logger.info("✅ MongoDB collections are ready")
-        except Exception as exc:
-            logger.error("❌ Failed to initialise MongoDB: %s", exc)
-            raise
-
+        logger.info("✅ PostgreSQL schema ensured")
         await self._grant_permanent_proplus_subscription(5545099444)
 
     async def _grant_permanent_proplus_subscription(self, telegram_id: int):
@@ -128,234 +248,313 @@ class DatabaseService:
     # User management
     # ------------------------------------------------------------------
     async def find_user(self, telegram_id: int) -> Optional[User]:
-        doc = await self.users.find_one({"telegram_id": telegram_id})
-        if doc:
-            return User(telegram_id=doc["telegram_id"], player_tag=doc.get("player_tag", ""))
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT telegram_id, COALESCE(player_tag, '') AS player_tag FROM users WHERE telegram_id=$1",
+                telegram_id,
+            )
+        if row:
+            return User(telegram_id=row["telegram_id"], player_tag=row["player_tag"] or "")
         return None
 
     async def save_user(self, user: User) -> bool:
-        try:
-            await self.users.update_one(
-                {"telegram_id": user.telegram_id},
-                {"$set": {"telegram_id": user.telegram_id, "player_tag": user.player_tag}},
-                upsert=True,
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO users (telegram_id, player_tag)
+                VALUES ($1, $2)
+                ON CONFLICT (telegram_id) DO UPDATE SET player_tag=EXCLUDED.player_tag
+                """,
+                user.telegram_id,
+                user.player_tag,
             )
-            return True
-        except PyMongoError as exc:
-            logger.error("Ошибка при сохранении пользователя: %s", exc)
-            return False
+        return True
 
     async def delete_user(self, telegram_id: int) -> bool:
-        try:
-            await self.users.delete_one({"telegram_id": telegram_id})
-            return True
-        except PyMongoError as exc:
-            logger.error("Ошибка при удалении пользователя: %s", exc)
-            return False
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM users WHERE telegram_id=$1", telegram_id)
+        return True
 
     async def get_all_users(self) -> List[Dict[str, Any]]:
-        users: List[Dict[str, Any]] = []
-        async for doc in self.users.find({}, {"_id": 0}).sort("telegram_id", ASCENDING):
-            users.append({"telegram_id": doc["telegram_id"], "player_tag": doc.get("player_tag")})
-        return users
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("SELECT telegram_id, player_tag FROM users ORDER BY telegram_id ASC")
+        return [{"telegram_id": row["telegram_id"], "player_tag": row["player_tag"]} for row in rows]
 
     # ------------------------------------------------------------------
     # User profiles
     # ------------------------------------------------------------------
     async def save_user_profile(self, profile: UserProfile) -> bool:
-        try:
-            if profile.is_primary:
-                await self.user_profiles.update_many({"telegram_id": profile.telegram_id}, {"$set": {"is_primary": False}})
-
-            await self.user_profiles.update_one(
-                {"telegram_id": profile.telegram_id, "player_tag": profile.player_tag},
-                {
-                    "$set": {
-                        "telegram_id": profile.telegram_id,
-                        "player_tag": profile.player_tag,
-                        "profile_name": profile.profile_name,
-                        "is_primary": bool(profile.is_primary),
-                        "created_at": profile.created_at,
-                    }
-                },
-                upsert=True,
-            )
-            return True
-        except PyMongoError as exc:
-            logger.error("Ошибка при сохранении профиля: %s", exc)
-            return False
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                if profile.is_primary:
+                    await conn.execute(
+                        "UPDATE user_profiles SET is_primary=FALSE WHERE telegram_id=$1",
+                        profile.telegram_id,
+                    )
+                await conn.execute(
+                    """
+                    INSERT INTO user_profiles (telegram_id, player_tag, profile_name, is_primary, created_at)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (telegram_id, player_tag) DO UPDATE SET
+                        profile_name=EXCLUDED.profile_name,
+                        is_primary=EXCLUDED.is_primary,
+                        created_at=EXCLUDED.created_at
+                    """,
+                    profile.telegram_id,
+                    profile.player_tag,
+                    profile.profile_name,
+                    bool(profile.is_primary),
+                    _parse_iso(profile.created_at) or datetime.now(),
+                )
+        return True
 
     async def get_user_profiles(self, telegram_id: int) -> List[UserProfile]:
-        profiles: List[UserProfile] = []
-        cursor = self.user_profiles.find({"telegram_id": telegram_id}).sort(
-            [("is_primary", DESCENDING), ("created_at", ASCENDING)]
-        )
-        async for doc in cursor:
-            profile = UserProfile(
-                telegram_id=doc["telegram_id"],
-                player_tag=doc["player_tag"],
-                profile_name=doc.get("profile_name"),
-                is_primary=bool(doc.get("is_primary", False)),
-                created_at=doc.get("created_at"),
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, telegram_id, player_tag, profile_name, is_primary, created_at
+                FROM user_profiles
+                WHERE telegram_id=$1
+                ORDER BY is_primary DESC, created_at ASC
+                """,
+                telegram_id,
             )
-            profile.profile_id = str(doc.get("_id"))
+        profiles: List[UserProfile] = []
+        for row in rows:
+            profile = UserProfile(
+                telegram_id=row["telegram_id"],
+                player_tag=row["player_tag"],
+                profile_name=row["profile_name"],
+                is_primary=bool(row["is_primary"]),
+                created_at=_timestamp_to_iso(row["created_at"]),
+                profile_id=row["id"],
+            )
             profiles.append(profile)
         return profiles
 
     async def delete_user_profile(self, telegram_id: int, player_tag: str) -> bool:
-        try:
-            await self.user_profiles.delete_one({"telegram_id": telegram_id, "player_tag": player_tag})
-            return True
-        except PyMongoError as exc:
-            logger.error("Ошибка при удалении профиля: %s", exc)
-            return False
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM user_profiles WHERE telegram_id=$1 AND player_tag=$2",
+                telegram_id,
+                player_tag,
+            )
+        return True
 
     async def get_user_profile_count(self, telegram_id: int) -> int:
-        return await self.user_profiles.count_documents({"telegram_id": telegram_id})
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) AS cnt FROM user_profiles WHERE telegram_id=$1",
+                telegram_id,
+            )
+        return int(row["cnt"]) if row else 0
 
     async def set_primary_profile(self, telegram_id: int, player_tag: str) -> bool:
-        try:
-            await self.user_profiles.update_many({"telegram_id": telegram_id}, {"$set": {"is_primary": False}})
-            result = await self.user_profiles.update_one(
-                {"telegram_id": telegram_id, "player_tag": player_tag},
-                {"$set": {"is_primary": True}},
-            )
-            return result.matched_count > 0
-        except PyMongoError as exc:
-            logger.error("Ошибка при установке основного профиля: %s", exc)
-            return False
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("UPDATE user_profiles SET is_primary=FALSE WHERE telegram_id=$1", telegram_id)
+                result = await conn.execute(
+                    "UPDATE user_profiles SET is_primary=TRUE WHERE telegram_id=$1 AND player_tag=$2",
+                    telegram_id,
+                    player_tag,
+                )
+        return result.upper().startswith("UPDATE") and "0" not in result.split()
 
     async def get_primary_profile(self, telegram_id: int) -> Optional[UserProfile]:
-        doc = await self.user_profiles.find_one({"telegram_id": telegram_id, "is_primary": True})
-        if doc:
-            profile = UserProfile(
-                telegram_id=doc["telegram_id"],
-                player_tag=doc["player_tag"],
-                profile_name=doc.get("profile_name"),
-                is_primary=True,
-                created_at=doc.get("created_at"),
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, telegram_id, player_tag, profile_name, is_primary, created_at
+                FROM user_profiles
+                WHERE telegram_id=$1 AND is_primary=TRUE
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                telegram_id,
             )
-            profile.profile_id = str(doc.get("_id"))
-            return profile
+        if row:
+            return UserProfile(
+                telegram_id=row["telegram_id"],
+                player_tag=row["player_tag"],
+                profile_name=row["profile_name"],
+                is_primary=True,
+                created_at=_timestamp_to_iso(row["created_at"]),
+                profile_id=row["id"],
+            )
         return None
 
     # ------------------------------------------------------------------
     # Wars
     # ------------------------------------------------------------------
     async def save_war(self, war: WarToSave) -> bool:
-        attacks: List[Dict[str, Any]] = []
-        for member_tag, attack_list in (war.attacks_by_member or {}).items():
-            for attack in attack_list:
-                attacks.append(
-                    {
-                        "attacker_tag": member_tag,
-                        "attacker_name": attack.get("attacker_name", ""),
-                        "defender_tag": attack.get("defender_tag", ""),
-                        "stars": attack.get("stars", 0),
-                        "destruction": attack.get("destruction", 0.0),
-                        "order": attack.get("order", 0),
-                        "timestamp": attack.get("timestamp", 0),
-                        "is_violation": bool(attack.get("is_violation", False)),
-                    }
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    INSERT INTO wars (
+                        end_time, opponent_name, team_size, clan_stars, opponent_stars,
+                        clan_destruction, opponent_destruction, clan_attacks_used, result,
+                        is_cwl_war, total_violations, created_at, updated_at
+                    )
+                    VALUES (
+                        $1, $2, $3, $4, $5,
+                        $6, $7, $8, $9,
+                        $10, $11, NOW(), NOW()
+                    )
+                    ON CONFLICT (end_time) DO UPDATE SET
+                        opponent_name=EXCLUDED.opponent_name,
+                        team_size=EXCLUDED.team_size,
+                        clan_stars=EXCLUDED.clan_stars,
+                        opponent_stars=EXCLUDED.opponent_stars,
+                        clan_destruction=EXCLUDED.clan_destruction,
+                        opponent_destruction=EXCLUDED.opponent_destruction,
+                        clan_attacks_used=EXCLUDED.clan_attacks_used,
+                        result=EXCLUDED.result,
+                        is_cwl_war=EXCLUDED.is_cwl_war,
+                        total_violations=EXCLUDED.total_violations,
+                        updated_at=NOW()
+                    """,
+                    war.end_time,
+                    war.opponent_name,
+                    war.team_size,
+                    war.clan_stars,
+                    war.opponent_stars,
+                    war.clan_destruction,
+                    war.opponent_destruction,
+                    war.clan_attacks_used,
+                    war.result,
+                    bool(war.is_cwl_war),
+                    war.total_violations,
                 )
-        try:
-            await self.wars.update_one(
-                {"end_time": war.end_time},
-                {
-                    "$set": {
-                        "end_time": war.end_time,
-                        "opponent_name": war.opponent_name,
-                        "team_size": war.team_size,
-                        "clan_stars": war.clan_stars,
-                        "opponent_stars": war.opponent_stars,
-                        "clan_destruction": war.clan_destruction,
-                        "opponent_destruction": war.opponent_destruction,
-                        "clan_attacks_used": war.clan_attacks_used,
-                        "result": war.result,
-                        "is_cwl_war": bool(war.is_cwl_war),
-                        "total_violations": war.total_violations,
-                        "attacks": attacks,
-                        "updated_at": datetime.now(),
-                    },
-                    "$setOnInsert": {"created_at": datetime.now()},
-                },
-                upsert=True,
-            )
-            return True
-        except PyMongoError as exc:
-            logger.error("❌ Ошибка при сохранении войны %s: %s", war.end_time, exc)
-            return False
+
+                await conn.execute("DELETE FROM war_attacks WHERE war_end_time=$1", war.end_time)
+
+                attack_order = 0
+                for member_tag, attack_list in (war.attacks_by_member or {}).items():
+                    for attack in attack_list:
+                        attack_order += 1
+                        await conn.execute(
+                            """
+                            INSERT INTO war_attacks (
+                                war_end_time, attacker_tag, attacker_name, defender_tag,
+                                stars, destruction, attack_order, timestamp, is_violation
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                            """,
+                            war.end_time,
+                            member_tag,
+                            attack.get("attacker_name", ""),
+                            attack.get("defender_tag", ""),
+                            attack.get("stars", 0),
+                            attack.get("destruction", 0.0),
+                            attack.get("order", attack_order),
+                            attack.get("timestamp", 0),
+                            bool(attack.get("is_violation", False)),
+                        )
+        return True
 
     async def war_exists(self, end_time: str) -> bool:
-        doc = await self.wars.find_one({"end_time": end_time}, {"_id": 1})
-        return doc is not None
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT 1 FROM wars WHERE end_time=$1", end_time)
+        return row is not None
 
     async def get_subscribed_users(self) -> List[int]:
-        return [doc["telegram_id"] async for doc in self.notifications.find({}, {"_id": 0, "telegram_id": 1})]
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("SELECT telegram_id FROM notifications")
+        return [row["telegram_id"] for row in rows]
 
     async def toggle_notifications(self, telegram_id: int) -> bool:
-        if await self.notifications.find_one({"telegram_id": telegram_id}):
-            await self.notifications.delete_one({"telegram_id": telegram_id})
-            return False
-        await self.notifications.update_one(
-            {"telegram_id": telegram_id},
-            {"$set": {"telegram_id": telegram_id, "enabled_at": datetime.now()}},
-            upsert=True,
-        )
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT 1 FROM notifications WHERE telegram_id=$1", telegram_id)
+            if row:
+                await conn.execute("DELETE FROM notifications WHERE telegram_id=$1", telegram_id)
+                return False
+            await conn.execute(
+                """
+                INSERT INTO notifications (telegram_id, enabled_at)
+                VALUES ($1, NOW())
+                ON CONFLICT (telegram_id) DO UPDATE SET enabled_at=EXCLUDED.enabled_at
+                """,
+                telegram_id,
+            )
         return True
 
     async def save_donation_snapshot(self, members: List[Dict], snapshot_time: str = None):
+        if not members:
+            return
+        pool = await self._ensure_pool()
         snapshot_time = snapshot_time or datetime.now().isoformat()
-        operations: List[UpdateOne] = []
-        for member in members:
-            player_tag = member.get("tag")
-            if not player_tag:
-                continue
-            operations.append(
-                UpdateOne(
-                    {"player_tag": player_tag, "snapshot_time": snapshot_time},
-                    {
-                        "$set": {
-                            "player_tag": player_tag,
-                            "snapshot_time": snapshot_time,
-                            "donations": member.get("donations", 0),
-                        }
-                    },
-                    upsert=True,
-                )
-            )
-        if operations:
-            await self.player_stats_snapshots.bulk_write(operations, ordered=False)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                for member in members:
+                    player_tag = member.get("tag")
+                    if not player_tag:
+                        continue
+                    await conn.execute(
+                        """
+                        INSERT INTO player_stats_snapshots (player_tag, snapshot_time, donations)
+                        VALUES ($1, $2, $3)
+                        ON CONFLICT (player_tag, snapshot_time) DO UPDATE SET donations=EXCLUDED.donations
+                        """,
+                        player_tag,
+                        snapshot_time,
+                        member.get("donations", 0),
+                    )
 
     async def get_war_list(self, limit: int = 10, offset: int = 0) -> List[Dict]:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT end_time, opponent_name, team_size, clan_stars, opponent_stars, result, is_cwl_war
+                FROM wars
+                ORDER BY end_time DESC
+                LIMIT $1 OFFSET $2
+                """,
+                limit,
+                offset,
+            )
         wars: List[Dict[str, Any]] = []
-        cursor = self.wars.find({}, {
-            "_id": 0,
-            "end_time": 1,
-            "opponent_name": 1,
-            "team_size": 1,
-            "clan_stars": 1,
-            "opponent_stars": 1,
-            "result": 1,
-            "is_cwl_war": 1,
-        }).sort("end_time", DESCENDING).skip(offset).limit(limit)
-        async for doc in cursor:
-            wars.append({
-                "end_time": doc.get("end_time"),
-                "opponent_name": doc.get("opponent_name"),
-                "team_size": doc.get("team_size"),
-                "clan_stars": doc.get("clan_stars"),
-                "opponent_stars": doc.get("opponent_stars"),
-                "result": doc.get("result"),
-                "is_cwl_war": bool(doc.get("is_cwl_war", False)),
-            })
+        for row in rows:
+            wars.append(
+                {
+                    "end_time": row["end_time"],
+                    "opponent_name": row["opponent_name"],
+                    "team_size": row["team_size"],
+                    "clan_stars": row["clan_stars"],
+                    "opponent_stars": row["opponent_stars"],
+                    "result": row["result"],
+                    "is_cwl_war": bool(row["is_cwl_war"]),
+                }
+            )
         return wars
 
     async def get_cwl_bonus_data(self, year_month: str) -> List[Dict]:
-        doc = await self.cwl_seasons.find_one({"season_date": {"$regex": f"^{year_month}"}})
-        if not doc:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT bonus_results_json FROM cwl_seasons WHERE season_date LIKE $1 || '%' LIMIT 1",
+                year_month,
+            )
+        if not row:
             return []
-        bonus_data = doc.get("bonus_results_json")
+        bonus_data = row["bonus_results_json"]
+        if not bonus_data:
+            return []
         if isinstance(bonus_data, list):
             return bonus_data
         if isinstance(bonus_data, str):
@@ -369,39 +568,63 @@ class DatabaseService:
         return []
 
     async def get_cwl_season_donation_stats(self, season_start: str, season_end: str) -> Dict[str, int]:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT player_tag, snapshot_time, donations
+                FROM player_stats_snapshots
+                WHERE snapshot_time BETWEEN $1 AND $2
+                ORDER BY player_tag ASC, snapshot_time ASC
+                """,
+                season_start,
+                season_end,
+            )
         stats: Dict[str, int] = {}
-        cursor = self.player_stats_snapshots.find(
-            {"snapshot_time": {"$gte": season_start, "$lte": season_end}}
-        ).sort([("player_tag", ASCENDING), ("snapshot_time", ASCENDING)])
-
         snapshots: Dict[str, List[Dict[str, Any]]] = {}
-        async for doc in cursor:
-            snapshots.setdefault(doc["player_tag"], []).append(doc)
-
+        for row in rows:
+            snapshots.setdefault(row["player_tag"], []).append(
+                {
+                    "snapshot_time": row["snapshot_time"],
+                    "donations": row["donations"],
+                }
+            )
         for player_tag, entries in snapshots.items():
             if len(entries) >= 2:
-                stats[player_tag] = max(0, entries[-1].get("donations", 0) - entries[0].get("donations", 0))
+                stats[player_tag] = max(0, entries[-1]["donations"] - entries[0]["donations"])
             elif entries:
-                stats[player_tag] = entries[0].get("donations", 0)
+                stats[player_tag] = entries[0]["donations"]
         return stats
 
     async def get_cwl_season_attack_stats(self, season_start: str, season_end: str) -> Dict[str, Dict]:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT w.end_time, w.is_cwl_war, a.attacker_tag
+                FROM wars w
+                LEFT JOIN war_attacks a ON a.war_end_time = w.end_time
+                WHERE w.end_time BETWEEN $1 AND $2
+                ORDER BY w.end_time ASC, a.attack_order ASC
+                """,
+                season_start,
+                season_end,
+            )
+        war_attack_counts: Dict[str, Dict[str, int]] = {}
+        war_types: Dict[str, bool] = {}
+        for row in rows:
+            end_time = row["end_time"]
+            war_types[end_time] = bool(row["is_cwl_war"])
+            attacker_tag = row["attacker_tag"]
+            if not attacker_tag:
+                continue
+            counter = war_attack_counts.setdefault(end_time, {})
+            counter[attacker_tag] = counter.get(attacker_tag, 0) + 1
+
         player_stats: Dict[str, Dict[str, int]] = {}
-        cursor = self.wars.find(
-            {"end_time": {"$gte": season_start, "$lte": season_end}},
-            {"end_time": 1, "is_cwl_war": 1, "attacks": 1},
-        ).sort("end_time", ASCENDING)
-
-        async for war_doc in cursor:
-            is_cwl = bool(war_doc.get("is_cwl_war", False))
-            per_war_counts: Dict[str, int] = {}
-            for attack in war_doc.get("attacks", []):
-                tag = attack.get("attacker_tag")
-                if not tag:
-                    continue
-                per_war_counts[tag] = per_war_counts.get(tag, 0) + 1
-
-            for tag, count in per_war_counts.items():
+        for end_time, counter in war_attack_counts.items():
+            is_cwl = war_types.get(end_time, False)
+            for tag, count in counter.items():
                 stats_entry = player_stats.setdefault(
                     tag,
                     {"cwl_attacks": 0, "regular_attacks": 0, "cwl_wars": 0, "regular_wars": 0},
@@ -415,54 +638,115 @@ class DatabaseService:
         return player_stats
 
     async def get_war_details(self, end_time: str) -> Optional[Dict]:
-        doc = await self.wars.find_one({"end_time": end_time}, {"_id": 0})
-        if not doc:
-            return None
-        doc.setdefault("attacks", [])
-        return doc
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            war_row = await conn.fetchrow(
+                """
+                SELECT end_time, opponent_name, team_size, clan_stars, opponent_stars,
+                       clan_destruction, opponent_destruction, clan_attacks_used, result,
+                       is_cwl_war, total_violations, created_at, updated_at
+                FROM wars WHERE end_time=$1
+                """,
+                end_time,
+            )
+            if not war_row:
+                return None
+            attack_rows = await conn.fetch(
+                """
+                SELECT attacker_tag, attacker_name, defender_tag, stars, destruction,
+                       attack_order, timestamp, is_violation
+                FROM war_attacks
+                WHERE war_end_time=$1
+                ORDER BY attack_order ASC
+                """,
+                end_time,
+            )
+        attacks = [
+            {
+                "attacker_tag": row["attacker_tag"],
+                "attacker_name": row["attacker_name"],
+                "defender_tag": row["defender_tag"],
+                "stars": row["stars"],
+                "destruction": row["destruction"],
+                "order": row["attack_order"],
+                "timestamp": row["timestamp"],
+                "is_violation": bool(row["is_violation"]),
+            }
+            for row in attack_rows
+        ]
+        return {
+            "end_time": war_row["end_time"],
+            "opponent_name": war_row["opponent_name"],
+            "team_size": war_row["team_size"],
+            "clan_stars": war_row["clan_stars"],
+            "opponent_stars": war_row["opponent_stars"],
+            "clan_destruction": war_row["clan_destruction"],
+            "opponent_destruction": war_row["opponent_destruction"],
+            "clan_attacks_used": war_row["clan_attacks_used"],
+            "result": war_row["result"],
+            "is_cwl_war": bool(war_row["is_cwl_war"]),
+            "total_violations": war_row["total_violations"],
+            "created_at": _timestamp_to_iso(war_row["created_at"]),
+            "updated_at": _timestamp_to_iso(war_row["updated_at"]),
+            "attacks": attacks,
+        }
 
     # ------------------------------------------------------------------
     # Subscriptions
     # ------------------------------------------------------------------
     async def save_subscription(self, subscription: Subscription) -> bool:
-        try:
-            now = datetime.now()
-            await self.subscriptions.update_one(
-                {"telegram_id": subscription.telegram_id},
-                {
-                    "$set": {
-                        "telegram_id": subscription.telegram_id,
-                        "subscription_type": subscription.subscription_type,
-                        "start_date": subscription.start_date,
-                        "end_date": subscription.end_date,
-                        "is_active": bool(subscription.is_active),
-                        "payment_id": subscription.payment_id,
-                        "amount": subscription.amount,
-                        "currency": subscription.currency or "RUB",
-                        "updated_at": now,
-                    },
-                    "$setOnInsert": {"created_at": now},
-                },
-                upsert=True,
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO subscriptions (
+                    telegram_id, subscription_type, start_date, end_date,
+                    is_active, payment_id, amount, currency, created_at, updated_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+                ON CONFLICT (telegram_id) DO UPDATE SET
+                    subscription_type=EXCLUDED.subscription_type,
+                    start_date=EXCLUDED.start_date,
+                    end_date=EXCLUDED.end_date,
+                    is_active=EXCLUDED.is_active,
+                    payment_id=EXCLUDED.payment_id,
+                    amount=EXCLUDED.amount,
+                    currency=EXCLUDED.currency,
+                    updated_at=NOW()
+                """,
+                subscription.telegram_id,
+                subscription.subscription_type,
+                subscription.start_date,
+                subscription.end_date,
+                bool(subscription.is_active),
+                subscription.payment_id,
+                subscription.amount,
+                subscription.currency or "RUB",
             )
-            return True
-        except PyMongoError as exc:
-            logger.error("Ошибка при сохранении подписки: %s", exc)
-            return False
+        return True
 
     async def get_subscription(self, telegram_id: int) -> Optional[Subscription]:
-        doc = await self.subscriptions.find_one({"telegram_id": telegram_id})
-        if not doc:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT telegram_id, subscription_type, start_date, end_date, is_active,
+                       payment_id, amount, currency
+                FROM subscriptions WHERE telegram_id=$1
+                """,
+                telegram_id,
+            )
+        if not row:
             return None
         return Subscription(
-            telegram_id=doc["telegram_id"],
-            subscription_type=doc.get("subscription_type", ""),
-            start_date=doc.get("start_date", datetime.now()),
-            end_date=doc.get("end_date", datetime.now()),
-            is_active=bool(doc.get("is_active", False)),
-            payment_id=doc.get("payment_id"),
-            amount=doc.get("amount"),
-            currency=doc.get("currency", "RUB"),
+            telegram_id=row["telegram_id"],
+            subscription_type=row["subscription_type"] or "",
+            start_date=row["start_date"] or datetime.now(),
+            end_date=row["end_date"] or datetime.now(),
+            is_active=bool(row["is_active"]),
+            payment_id=row["payment_id"],
+            amount=float(row["amount"]) if row["amount"] is not None else None,
+            currency=row["currency"] or "RUB",
         )
 
     async def extend_subscription(self, telegram_id: int, additional_days: int) -> bool:
@@ -474,48 +758,61 @@ class DatabaseService:
         return await self.save_subscription(subscription)
 
     async def deactivate_subscription(self, telegram_id: int) -> bool:
-        try:
-            await self.subscriptions.update_one(
-                {"telegram_id": telegram_id},
-                {"$set": {"is_active": False, "updated_at": datetime.now()}},
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE subscriptions SET is_active=FALSE, updated_at=NOW() WHERE telegram_id=$1",
+                telegram_id,
             )
-            return True
-        except PyMongoError as exc:
-            logger.error("Ошибка при деактивации подписки: %s", exc)
-            return False
+        return True
 
     async def get_expired_subscriptions(self) -> List[Subscription]:
+        pool = await self._ensure_pool()
         now = datetime.now()
-        cursor = self.subscriptions.find({"is_active": True, "end_date": {"$lt": now}})
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM subscriptions WHERE is_active=TRUE AND end_date < $1",
+                now,
+            )
         results: List[Subscription] = []
-        async for doc in cursor:
+        for row in rows:
             results.append(
                 Subscription(
-                    telegram_id=doc["telegram_id"],
-                    subscription_type=doc.get("subscription_type", ""),
-                    start_date=doc.get("start_date", now),
-                    end_date=doc.get("end_date", now),
+                    telegram_id=row["telegram_id"],
+                    subscription_type=row["subscription_type"] or "",
+                    start_date=row["start_date"] or now,
+                    end_date=row["end_date"] or now,
                     is_active=True,
-                    payment_id=doc.get("payment_id"),
-                    amount=doc.get("amount"),
-                    currency=doc.get("currency", "RUB"),
+                    payment_id=row["payment_id"],
+                    amount=float(row["amount"]) if row["amount"] is not None else None,
+                    currency=row["currency"] or "RUB",
                 )
             )
         return results
 
     async def is_notifications_enabled(self, telegram_id: int) -> bool:
-        return await self.notifications.find_one({"telegram_id": telegram_id}) is not None
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT 1 FROM notifications WHERE telegram_id=$1", telegram_id)
+        return row is not None
 
     async def enable_notifications(self, telegram_id: int) -> bool:
-        await self.notifications.update_one(
-            {"telegram_id": telegram_id},
-            {"$set": {"telegram_id": telegram_id, "enabled_at": datetime.now()}},
-            upsert=True,
-        )
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO notifications (telegram_id, enabled_at)
+                VALUES ($1, NOW())
+                ON CONFLICT (telegram_id) DO UPDATE SET enabled_at=EXCLUDED.enabled_at
+                """,
+                telegram_id,
+            )
         return True
 
     async def disable_notifications(self, telegram_id: int) -> bool:
-        await self.notifications.delete_one({"telegram_id": telegram_id})
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM notifications WHERE telegram_id=$1", telegram_id)
         return True
 
     async def get_notification_users(self) -> List[int]:
@@ -525,63 +822,83 @@ class DatabaseService:
     # Building tracking
     # ------------------------------------------------------------------
     async def save_building_tracker(self, tracker: BuildingTracker) -> bool:
-        try:
-            await self.building_trackers.update_one(
-                {"telegram_id": tracker.telegram_id, "player_tag": tracker.player_tag},
-                {
-                    "$set": {
-                        "telegram_id": tracker.telegram_id,
-                        "player_tag": tracker.player_tag,
-                        "is_active": bool(tracker.is_active),
-                        "created_at": tracker.created_at,
-                        "last_check": tracker.last_check,
-                    }
-                },
-                upsert=True,
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO building_trackers (
+                    telegram_id, player_tag, is_active, created_at, last_check
+                )
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (telegram_id, player_tag) DO UPDATE SET
+                    is_active=EXCLUDED.is_active,
+                    created_at=EXCLUDED.created_at,
+                    last_check=EXCLUDED.last_check
+                """,
+                tracker.telegram_id,
+                tracker.player_tag,
+                bool(tracker.is_active),
+                _parse_iso(tracker.created_at) or datetime.now(),
+                _parse_iso(tracker.last_check),
             )
-            return True
-        except PyMongoError as exc:
-            logger.error("Ошибка при сохранении настроек отслеживания: %s", exc)
-            return False
+        return True
 
     async def get_building_tracker(self, telegram_id: int) -> Optional[BuildingTracker]:
         trackers = await self.get_user_building_trackers(telegram_id)
         return trackers[0] if trackers else None
 
     async def get_user_building_trackers(self, telegram_id: int) -> List[BuildingTracker]:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT telegram_id, player_tag, is_active, created_at, last_check FROM building_trackers WHERE telegram_id=$1",
+                telegram_id,
+            )
         trackers: List[BuildingTracker] = []
-        cursor = self.building_trackers.find({"telegram_id": telegram_id})
-        async for doc in cursor:
+        for row in rows:
             trackers.append(
                 BuildingTracker(
-                    telegram_id=doc["telegram_id"],
-                    player_tag=doc.get("player_tag", ""),
-                    is_active=bool(doc.get("is_active", False)),
-                    created_at=doc.get("created_at"),
-                    last_check=doc.get("last_check"),
+                    telegram_id=row["telegram_id"],
+                    player_tag=row["player_tag"],
+                    is_active=bool(row["is_active"]),
+                    created_at=_timestamp_to_iso(row["created_at"]),
+                    last_check=_timestamp_to_iso(row["last_check"]),
                 )
             )
         return trackers
 
     async def get_building_tracker_for_profile(self, telegram_id: int, player_tag: str) -> Optional[BuildingTracker]:
-        doc = await self.building_trackers.find_one({"telegram_id": telegram_id, "player_tag": player_tag})
-        if doc:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT telegram_id, player_tag, is_active, created_at, last_check
+                FROM building_trackers
+                WHERE telegram_id=$1 AND player_tag=$2
+                """,
+                telegram_id,
+                player_tag,
+            )
+        if row:
             return BuildingTracker(
-                telegram_id=doc["telegram_id"],
-                player_tag=doc.get("player_tag", ""),
-                is_active=bool(doc.get("is_active", False)),
-                created_at=doc.get("created_at"),
-                last_check=doc.get("last_check"),
+                telegram_id=row["telegram_id"],
+                player_tag=row["player_tag"],
+                is_active=bool(row["is_active"]),
+                created_at=_timestamp_to_iso(row["created_at"]),
+                last_check=_timestamp_to_iso(row["last_check"]),
             )
         return None
 
     async def toggle_building_tracker_for_profile(self, telegram_id: int, player_tag: str) -> bool:
         tracker = await self.get_building_tracker_for_profile(telegram_id, player_tag)
         if tracker:
-            await self.building_trackers.update_one(
-                {"telegram_id": telegram_id, "player_tag": player_tag},
-                {"$set": {"is_active": not tracker.is_active}},
-            )
+            pool = await self._ensure_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE building_trackers SET is_active=NOT is_active WHERE telegram_id=$1 AND player_tag=$2",
+                    telegram_id,
+                    player_tag,
+                )
             return True
         tracker = BuildingTracker(
             telegram_id=telegram_id,
@@ -592,107 +909,130 @@ class DatabaseService:
         return await self.save_building_tracker(tracker)
 
     async def get_active_building_trackers(self) -> List[BuildingTracker]:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT telegram_id, player_tag, is_active, created_at, last_check FROM building_trackers WHERE is_active=TRUE"
+            )
         trackers: List[BuildingTracker] = []
-        async for doc in self.building_trackers.find({"is_active": True}):
+        for row in rows:
             trackers.append(
                 BuildingTracker(
-                    telegram_id=doc["telegram_id"],
-                    player_tag=doc.get("player_tag", ""),
+                    telegram_id=row["telegram_id"],
+                    player_tag=row["player_tag"],
                     is_active=True,
-                    created_at=doc.get("created_at"),
-                    last_check=doc.get("last_check"),
+                    created_at=_timestamp_to_iso(row["created_at"]),
+                    last_check=_timestamp_to_iso(row["last_check"]),
                 )
             )
         return trackers
 
     async def save_building_snapshot(self, snapshot: BuildingSnapshot) -> bool:
-        try:
-            await self.building_snapshots.update_one(
-                {"player_tag": snapshot.player_tag, "snapshot_time": snapshot.snapshot_time},
-                {
-                    "$set": {
-                        "player_tag": snapshot.player_tag,
-                        "snapshot_time": snapshot.snapshot_time,
-                        "buildings_data": snapshot.buildings_data,
-                    }
-                },
-                upsert=True,
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO building_snapshots (player_tag, snapshot_time, buildings_data)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (player_tag, snapshot_time) DO UPDATE SET buildings_data=EXCLUDED.buildings_data
+                """,
+                snapshot.player_tag,
+                snapshot.snapshot_time,
+                snapshot.buildings_data,
             )
-            return True
-        except PyMongoError as exc:
-            logger.error("Ошибка при сохранении снимка зданий: %s", exc)
-            return False
+        return True
 
     async def get_latest_building_snapshot(self, player_tag: str) -> Optional[BuildingSnapshot]:
-        doc = await self.building_snapshots.find_one(
-            {"player_tag": player_tag},
-            sort=[("snapshot_time", DESCENDING)],
-        )
-        if doc:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT player_tag, snapshot_time, buildings_data
+                FROM building_snapshots
+                WHERE player_tag=$1
+                ORDER BY snapshot_time DESC
+                LIMIT 1
+                """,
+                player_tag,
+            )
+        if row:
             return BuildingSnapshot(
-                player_tag=doc.get("player_tag", ""),
-                snapshot_time=doc.get("snapshot_time", ""),
-                buildings_data=doc.get("buildings_data", ""),
+                player_tag=row["player_tag"],
+                snapshot_time=row["snapshot_time"],
+                buildings_data=row["buildings_data"] or "",
             )
         return None
 
     async def update_tracker_last_check(self, telegram_id: int, last_check: str, player_tag: str = None) -> bool:
-        query: Dict[str, Any] = {"telegram_id": telegram_id}
+        pool = await self._ensure_pool()
+        params: List[Any] = [_parse_iso(last_check) or datetime.now(), telegram_id]
         if player_tag:
-            query["player_tag"] = player_tag
-        try:
-            await self.building_trackers.update_many(query, {"$set": {"last_check": last_check}})
-            return True
-        except PyMongoError as exc:
-            logger.error("Ошибка при обновлении времени проверки: %s", exc)
-            return False
+            query = "UPDATE building_trackers SET last_check=$1 WHERE telegram_id=$2 AND player_tag=$3"
+            params.append(player_tag)
+        else:
+            query = "UPDATE building_trackers SET last_check=$1 WHERE telegram_id=$2"
+        async with pool.acquire() as conn:
+            await conn.execute(query, *params)
+        return True
 
     # ------------------------------------------------------------------
     # Linked clans
     # ------------------------------------------------------------------
     async def get_linked_clans(self, telegram_id: int) -> List[LinkedClan]:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, telegram_id, clan_tag, clan_name, slot_number, created_at
+                FROM linked_clans
+                WHERE telegram_id=$1
+                ORDER BY slot_number ASC
+                """,
+                telegram_id,
+            )
         clans: List[LinkedClan] = []
-        cursor = self.linked_clans.find({"telegram_id": telegram_id}).sort("slot_number", ASCENDING)
-        async for doc in cursor:
+        for row in rows:
             clans.append(
                 LinkedClan(
-                    telegram_id=doc["telegram_id"],
-                    clan_tag=doc.get("clan_tag", ""),
-                    clan_name=doc.get("clan_name", ""),
-                    slot_number=doc.get("slot_number", 0),
-                    created_at=doc.get("created_at"),
-                    id=str(doc.get("_id")),
+                    telegram_id=row["telegram_id"],
+                    clan_tag=row["clan_tag"],
+                    clan_name=row["clan_name"],
+                    slot_number=row["slot_number"],
+                    created_at=_timestamp_to_iso(row["created_at"]),
+                    id=str(row["id"]),
                 )
             )
         return clans
 
     async def save_linked_clan(self, linked_clan: LinkedClan) -> bool:
-        try:
-            await self.linked_clans.update_one(
-                {"telegram_id": linked_clan.telegram_id, "slot_number": linked_clan.slot_number},
-                {
-                    "$set": {
-                        "telegram_id": linked_clan.telegram_id,
-                        "clan_tag": linked_clan.clan_tag,
-                        "clan_name": linked_clan.clan_name,
-                        "slot_number": linked_clan.slot_number,
-                        "created_at": linked_clan.created_at,
-                    }
-                },
-                upsert=True,
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO linked_clans (telegram_id, clan_tag, clan_name, slot_number, created_at)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (telegram_id, slot_number) DO UPDATE SET
+                    clan_tag=EXCLUDED.clan_tag,
+                    clan_name=EXCLUDED.clan_name,
+                    created_at=EXCLUDED.created_at
+                """,
+                linked_clan.telegram_id,
+                linked_clan.clan_tag,
+                linked_clan.clan_name,
+                linked_clan.slot_number,
+                _parse_iso(linked_clan.created_at) or datetime.now(),
             )
-            return True
-        except PyMongoError as exc:
-            logger.error("Ошибка при сохранении привязанного клана: %s", exc)
-            return False
+        return True
 
     async def delete_linked_clan(self, telegram_id: int, slot_number: int) -> bool:
-        try:
-            await self.linked_clans.delete_one({"telegram_id": telegram_id, "slot_number": slot_number})
-            return True
-        except PyMongoError as exc:
-            logger.error("Ошибка при удалении привязанного клана: %s", exc)
-            return False
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM linked_clans WHERE telegram_id=$1 AND slot_number=$2",
+                telegram_id,
+                slot_number,
+            )
+        return True
 
     async def get_max_linked_clans_for_user(self, telegram_id: int) -> int:
         try:
@@ -705,47 +1045,6 @@ class DatabaseService:
         except Exception as exc:  # pragma: no cover - defensive
             logger.error("Ошибка при получении лимита привязанных кланов: %s", exc)
         return 1
-
-    # ------------------------------------------------------------------
-    # War scan requests
-    # ------------------------------------------------------------------
-    async def can_request_war_scan(self, telegram_id: int) -> bool:
-        today = datetime.now().date().isoformat()
-        count = await self.war_scan_requests.count_documents(
-            {"telegram_id": telegram_id, "request_date": today, "status": "success"}
-        )
-        return count == 0
-
-    async def save_war_scan_request(
-        self,
-        telegram_id: int,
-        clan_tag: str,
-        status: str,
-        wars_added: int = 0,
-        request_type: str = "manual",
-    ) -> bool:
-        try:
-            await self.war_scan_requests.insert_one(
-                {
-                    "telegram_id": telegram_id,
-                    "clan_tag": clan_tag,
-                    "request_type": request_type,
-                    "request_date": datetime.now().date().isoformat(),
-                    "status": status,
-                    "wars_added": wars_added,
-                    "created_at": datetime.now(),
-                }
-            )
-            return True
-        except PyMongoError as exc:
-            logger.error("Ошибка при сохранении запроса сканирования: %s", exc)
-            return False
-
-    async def get_war_scan_requests_today(self, telegram_id: int) -> int:
-        today = datetime.now().date().isoformat()
-        return await self.war_scan_requests.count_documents(
-            {"telegram_id": telegram_id, "request_date": today, "status": "success"}
-        )
 
 
 __all__ = ["DatabaseService"]

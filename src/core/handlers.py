@@ -83,8 +83,6 @@ class MessageHandler:
             elif state == UserState.AWAITING_PLAYER_TAG_TO_ADD_PROFILE:
                 await self.message_generator.handle_add_profile_tag(update, context, tag)
             
-            elif state == UserState.AWAITING_CLAN_TAG_FOR_WAR_SCAN:
-                await self.message_generator.handle_war_scan_request(update, context, tag)
         
         except Exception as e:
             logger.error(f"Ошибка при обработке состояния {state}: {e}")
@@ -160,8 +158,6 @@ class MessageHandler:
             elif text == Keyboards.LINKED_CLANS_BTN:
                 await self.message_generator.handle_linked_clans_request(update, context)
             
-            elif text == Keyboards.REQUEST_WAR_SCAN_BTN:
-                await self.message_generator.handle_war_scan_button(update, context)
             
             elif text == Keyboards.NOTIFICATIONS_BTN:
                 await self.message_generator.handle_notifications_menu(update, context)
