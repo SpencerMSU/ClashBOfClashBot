@@ -22,13 +22,23 @@ logger = logging.getLogger(__name__)
 
 
 def _timestamp_to_iso(value: Optional[datetime]) -> Optional[str]:
-
-
     if isinstance(value, datetime):
         return value.isoformat()
     if value is None:
         return None
     return str(value)
+
+
+def _parse_iso(value: Optional[Any]) -> Optional[datetime]:
+    """Преобразование ISO-строки в datetime."""
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
 
 
 class DatabaseService:

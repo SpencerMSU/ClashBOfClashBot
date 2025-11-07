@@ -50,7 +50,31 @@ class BotConfig:
         # Настройки базы данных
         raw_database_url = api_tokens.get('DATABASE_URL', '') or os.getenv('DATABASE_URL', '')
         raw_database_path = api_tokens.get('DATABASE_PATH', '') or os.getenv('DATABASE_PATH', '')
-        self.DATABASE_URL: str = self._resolve_database_url(raw_database_url, raw_database_path)
+
+        # Дополнительные параметры подключения для PostgreSQL
+        self.DATABASE_HOST: str = (
+            api_tokens.get('DATABASE_HOST', '') or os.getenv('DATABASE_HOST', '') or 'localhost'
+        )
+        self.DATABASE_PORT: str = (
+            api_tokens.get('DATABASE_PORT', '') or os.getenv('DATABASE_PORT', '') or '5432'
+        )
+        self.DATABASE_USER: str = (
+            api_tokens.get('DATABASE_USER', '') or os.getenv('DATABASE_USER', '') or 'postgres'
+        )
+        self.DATABASE_PASSWORD: str = api_tokens.get('DATABASE_PASSWORD', '') or os.getenv(
+            'DATABASE_PASSWORD', ''
+        )
+        raw_database_name = api_tokens.get('DATABASE_NAME', '') or os.getenv('DATABASE_NAME', '')
+
+        self.DATABASE_URL: str = self._resolve_database_url(
+            database_url=raw_database_url,
+            database_path=raw_database_path,
+            database_name=raw_database_name,
+            host=self.DATABASE_HOST,
+            port=self.DATABASE_PORT,
+            user=self.DATABASE_USER,
+            password=self.DATABASE_PASSWORD,
+        )
 
         # Настройки клана
         self.OUR_CLAN_TAG: str = os.getenv('OUR_CLAN_TAG', '#2PQU0PLJ2')
@@ -66,24 +90,41 @@ class BotConfig:
         self._validate_config()
 
     @staticmethod
-    def _resolve_database_url(database_url: str, database_path: str) -> str:
+    def _resolve_database_url(
+        database_url: str,
+        database_path: str,
+        database_name: str,
+        host: str,
+        port: str,
+        user: str,
+        password: str,
+    ) -> str:
         """Определение итоговой строки подключения к базе данных."""
         if database_url:
             return database_url
 
-        if database_path:
-            if '://' in database_path:
-                return database_path
-            # Поддержка значения вроде "clashbot.db" из api_tokens.txt
-            db_name = database_path
-            if db_name.endswith('.db'):
-                db_name = db_name[:-3]
-            if not db_name:
-                db_name = 'clashbot'
-            return f"postgresql:///{db_name}"
+        if database_path and '://' in database_path:
+            return database_path
 
-        # Значение по умолчанию
-        return 'postgresql:///clashbot'
+        db_name = database_name or database_path or ''
+        if db_name.endswith('.db'):
+            db_name = db_name[:-3]
+        db_name = db_name or 'clashbot'
+
+        host = host or 'localhost'
+        port = port or '5432'
+        user = user or ''
+        password = password or ''
+
+        auth_part = ''
+        if user:
+            auth_part = user
+            if password:
+                auth_part += f":{password}"
+            auth_part += '@'
+
+        port_part = f":{port}" if port else ''
+        return f"postgresql://{auth_part}{host}{port_part}/{db_name}"
 
     def _validate_config(self):
         """Проверка обязательных параметров конфигурации"""

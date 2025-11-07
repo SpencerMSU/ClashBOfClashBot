@@ -26,37 +26,46 @@ logging.getLogger('telegram.ext').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
+def ensure_event_loop_policy():
+    """На некоторых системах требуется политика event loop совместимая с Windows."""
+    if os.name == 'nt':
+        try:
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())  # type: ignore[attr-defined]
+        except AttributeError:
+            logger.debug("Политика цикла событий Windows недоступна")
+
+
 async def main():
     """Главная функция приложения"""
     try:
         logger.info("Запуск бота Clash of Clans...")
-        
+
         # Проверяем переменные окружения
         if not config.BOT_TOKEN:
             logger.error("BOT_TOKEN не установлен. Добавьте токен в файл api_tokens.txt или переменную окружения BOT_TOKEN.")
             return
-        
+
         if not config.COC_API_TOKEN:
             logger.error("COC_API_TOKEN не установлен. Добавьте токен в файл api_tokens.txt или переменную окружения COC_API_TOKEN.")
             return
-        
+
         # Создание и запуск бота
         bot = ClashBot()
         await bot.run()
-        
+
     except KeyboardInterrupt:
         logger.info("Получен сигнал завершения")
-    except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
+    except Exception as exc:  # pragma: no cover - точка входа
+        logger.error("Критическая ошибка: %s", exc)
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    # Запуск бота
+    ensure_event_loop_policy()
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Программа завершена пользователем")
-    except Exception as e:
-        logger.error(f"Неожиданная ошибка: {e}")
+    except Exception as exc:  # pragma: no cover - точка входа
+        logger.error("Неожиданная ошибка: %s", exc)
         sys.exit(1)

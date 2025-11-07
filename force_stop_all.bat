@@ -11,20 +11,14 @@ for /f "tokens=2" %%i in ('tasklist /fi "imagename eq python.exe" /fo csv /nh 2^
     taskkill /f /pid %%i >nul 2>&1
 )
 
-REM Остановка процессов Python с all_importer.py
-for /f "tokens=2" %%i in ('tasklist /fi "imagename eq python.exe" /fo csv /nh 2^>nul ^| findstr "all_importer.py"') do (
-    echo 🛑 Остановка процесса Python all_importer.py: %%i
-    taskkill /f /pid %%i >nul 2>&1
-)
-
-REM Остановка всех python3.exe
-for /f "tokens=2" %%i in ('tasklist /fi "imagename eq python3.exe" /fo csv /nh 2^>nul') do (
-    echo 🛑 Остановка процесса Python3: %%i
+REM Остановка всех python3.exe, запущенных с main.py
+for /f "tokens=2" %%i in ('tasklist /fi "imagename eq python3.exe" /fo csv /nh 2^>nul ^| findstr "main.py"') do (
+    echo 🛑 Остановка процесса Python3 main.py: %%i
     taskkill /f /pid %%i >nul 2>&1
 )
 
 echo.
-echo 🔓 Проверка подключения к MongoDB...
+echo 🔓 Проверка подключения к PostgreSQL...
 python - <<"PY"
 import asyncio
 import sys
@@ -40,15 +34,14 @@ except RuntimeError as exc:
 
 async def main():
     db_service = DatabaseService()
-    print('🗄️ MongoDB URI:', getattr(db_service, 'mongo_uri', '<unknown>'))
-    print('🗄️ База данных:', getattr(db_service, 'db_name', '<unknown>'))
+    print('🗄️ Строка подключения:', getattr(db_service, 'database_url', '<unknown>'))
     try:
         await db_service.ping()
-        print('✅ Подключение к MongoDB активно')
+        print('✅ Подключение к PostgreSQL активно')
     except Exception as exc:
-        print('❌ Ошибка подключения к MongoDB:', exc)
+        print('❌ Ошибка подключения к PostgreSQL:', exc)
     finally:
-        db_service.client.close()
+        await db_service.close()
 
 asyncio.run(main())
 PY
