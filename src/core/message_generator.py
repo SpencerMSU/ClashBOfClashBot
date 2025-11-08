@@ -2338,7 +2338,18 @@ class MessageGenerator:
                 # Проверяем лимиты пользователя
                 max_clans = await self.db_service.get_max_linked_clans_for_user(chat_id)
                 current_clans = await self.db_service.get_linked_clans(chat_id)
-                
+
+                normalized_new_tag = clan_tag.replace("#", "").upper()
+                existing_tags = {
+                    clan.clan_tag.replace("#", "").upper() for clan in current_clans
+                }
+
+                if normalized_new_tag in existing_tags:
+                    await update.message.reply_text(
+                        "❌ Нельзя привязать 1 клан 2 раза, введите другой тег."
+                    )
+                    return
+
                 if len(current_clans) >= max_clans:
                     await update.message.reply_text(
                         f"❌ Достигнут лимит привязанных кланов ({max_clans}).\n"
