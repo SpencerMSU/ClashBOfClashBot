@@ -20,10 +20,6 @@ class TranslationManager:
                 'cwl_not_participating': '❌ Клан не участвует в текущем сезоне ЛВК.',
                 'cwl_back_to_clan': '⬅️ Назад к клану',
                 
-                # Analyzer Messages
-                'analyzer_coming_soon': '🤖 <b>Анализатор войн</b>\n\n🚧 <b>В разработке</b>\n\nАнализатор находится в стадии разработки.\nКогда-то он будет, но не сейчас.\n\nСледите за обновлениями!',
-                'analyzer_refresh_error': '🤖 <b>Анализатор войн</b>\n\n🚧 Функция временно недоступна.\nПопробуйте позже.',
-                
                 # Common Error Messages
                 'generic_error': '❌ Произошла ошибка. Попробуйте позже.',
                 'loading_error': '❌ Произошла ошибка при загрузке данных.',
@@ -135,10 +131,6 @@ class TranslationManager:
                 # CWL Messages
                 'cwl_not_participating': '❌ Clan is not participating in the current CWL season.',
                 'cwl_back_to_clan': '⬅️ Back to clan',
-                
-                # Analyzer Messages
-                'analyzer_coming_soon': '🤖 <b>War Analyzer</b>\n\n🚧 <b>Under Development</b>\n\nThe analyzer is under development.\nSomeday it will be, but not now.\n\nStay tuned for updates!',
-                'analyzer_refresh_error': '🤖 <b>War Analyzer</b>\n\n🚧 Feature temporarily unavailable.\nTry again later.',
                 
                 # Common Error Messages
                 'generic_error': '❌ An error occurred. Please try again later.',

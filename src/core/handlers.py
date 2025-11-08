@@ -51,7 +51,6 @@ class MessageHandler:
             text == Keyboards.BACK_TO_CLAN_MENU_BTN or
             text == Keyboards.NOTIFICATIONS_BTN or
             text == Keyboards.COMMUNITY_CENTER_BTN or
-            text == Keyboards.ANALYZER_BTN or
             text == Keyboards.SUBSCRIPTION_BTN or
             text == Keyboards.LINKED_CLANS_BTN or
             text.startswith(Keyboards.MY_PROFILE_PREFIX)):
@@ -164,9 +163,6 @@ class MessageHandler:
             
             elif text == Keyboards.COMMUNITY_CENTER_BTN:
                 await self.message_generator.handle_community_center_menu(update, context)
-            
-            elif text == Keyboards.ANALYZER_BTN:
-                await self.message_generator.handle_analyzer_menu(update, context)
             
             elif text == Keyboards.SUBSCRIPTION_BTN:
                 await self.message_generator.handle_subscription_menu(update, context)
@@ -536,9 +532,6 @@ class CallbackHandler:
                 await query.message.reply_text("Выберите действие:", 
                                               reply_markup=Keyboards.main_menu())
             
-            elif callback_type == "analyzer_refresh":
-                await self._handle_analyzer_refresh(update, context)
-
             else:
                 logger.warning(f"Неизвестный callback тип: {callback_type}")
                 await query.edit_message_text("❌ Неизвестная команда.")
@@ -942,28 +935,3 @@ class CallbackHandler:
         """Обработка отображения распределения бонусов ЛВК"""
         await self.message_generator.display_cwl_bonus_distribution(update, context)
     
-    async def _handle_analyzer_refresh(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработка обновления анализатора ИИ"""
-        try:
-            # Показываем сообщение о том, что функция в разработке
-            from src.utils.translations import translation_manager
-            message = translation_manager.get_text(update, 'analyzer_coming_soon',
-                '🤖 <b>Анализатор войн</b>\n\n🚧 <b>В разработке</b>\n\nАнализатор находится в стадии разработки.\nКогда-то он будет, но не сейчас.\n\nСледите за обновлениями!')
-            
-            # Создаем клавиатуру с возвратом в главное меню
-            back_text = translation_manager.get_text(update, 'back_to_main_menu', "⬅️ Главное меню")
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton(back_text, callback_data="main_menu")]
-            ])
-            
-            await update.callback_query.edit_message_text(
-                message,
-                parse_mode='HTML',
-                reply_markup=keyboard
-            )
-        except Exception as e:
-            logger.error(f"Ошибка при обновлении анализатора: {e}")
-            from src.utils.translations import translation_manager
-            error_message = translation_manager.get_text(update, 'analyzer_refresh_error',
-                '🤖 <b>Анализатор войн</b>\n\n🚧 Функция временно недоступна.\nПопробуйте позже.')
-            await update.callback_query.edit_message_text(error_message, parse_mode='HTML')
