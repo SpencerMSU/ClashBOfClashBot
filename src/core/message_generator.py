@@ -2347,7 +2347,7 @@ class MessageGenerator:
                     return
                 
                 # Создаем запись о привязанном клане
-                from models.linked_clan import LinkedClan
+                from src.models.linked_clan import LinkedClan
                 linked_clan = LinkedClan(
                     telegram_id=chat_id,
                     clan_tag=clan_tag,
