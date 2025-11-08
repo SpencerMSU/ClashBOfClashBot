@@ -5,6 +5,8 @@ from typing import List, Optional, Dict, Any
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from datetime import datetime, date
 
+from .game_emojis import COC_EMOJIS
+
 
 class Keyboards:
     """Класс для создания клавиатур бота"""
@@ -28,7 +30,7 @@ class Keyboards:
     CLAN_CURRENT_WAR_BTN = "⚔️ Текущая КВ"
     SUBSCRIPTION_BTN = "💎 Премиум подписка"
     LINKED_CLANS_BTN = "🔗 Привязанные кланы"
-    COMMUNITY_CENTER_BTN = "🏛️ Центр сообщества"
+    COMMUNITY_CENTER_BTN = f"{COC_EMOJIS['community']} Центр сообщества"
     ACHIEVEMENTS_BTN = "🏆 Достижения"
     
     # Константы для callback-данных
@@ -60,6 +62,7 @@ class Keyboards:
     LINKED_CLAN_ADD_CALLBACK = "linked_clan_add"
     LINKED_CLAN_DELETE_CALLBACK = "linked_clan_delete"
     COMMUNITY_CENTER_CALLBACK = "community_center"
+    COMMUNITY_LEAGUES_CALLBACK = "community_leagues"
     BUILDING_COSTS_CALLBACK = "building_costs"
     BUILDING_CATEGORY_CALLBACK = "building_category"
     BUILDING_DETAIL_CALLBACK = "building_detail"
@@ -606,24 +609,50 @@ class Keyboards:
     def community_center_menu() -> InlineKeyboardMarkup:
         """Меню центра сообщества"""
         keyboard = [
-            [InlineKeyboardButton("🏗️ Стоимости строений", 
-                                callback_data=Keyboards.BUILDING_COSTS_CALLBACK)],
-            [InlineKeyboardButton("🏰 Расстановки баз", 
-                                callback_data=Keyboards.BASE_LAYOUTS_CALLBACK)],
-            [InlineKeyboardButton("⬅️ Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton(
+                f"{COC_EMOJIS['building_costs']} Стоимости строений",
+                callback_data=Keyboards.BUILDING_COSTS_CALLBACK
+            )],
+            [InlineKeyboardButton(
+                f"{COC_EMOJIS['base_layouts']} Расстановки баз",
+                callback_data=Keyboards.BASE_LAYOUTS_CALLBACK
+            )],
+            [InlineKeyboardButton(
+                f"{COC_EMOJIS['leagues']} Новые лиги",
+                callback_data=Keyboards.COMMUNITY_LEAGUES_CALLBACK
+            )],
+            [InlineKeyboardButton(f"{COC_EMOJIS['back']} Главное меню", callback_data="main_menu")]
         ]
         return InlineKeyboardMarkup(keyboard)
-    
+
     @staticmethod
     def building_costs_menu() -> InlineKeyboardMarkup:
         """Меню выбора категории зданий"""
         keyboard = [
-            [InlineKeyboardButton("🏰 Оборона", callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:defense")],
-            [InlineKeyboardButton("⚔️ Армия", callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:army")],
-            [InlineKeyboardButton("💎 Ресурсы", callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:resources")],
-            [InlineKeyboardButton("👑 Герои", callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:heroes")],
-            [InlineKeyboardButton("🔨 Деревня строителя", callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:builder")],
-            [InlineKeyboardButton("⬅️ Центр сообщества", callback_data=Keyboards.COMMUNITY_CENTER_CALLBACK)]
+            [InlineKeyboardButton(
+                f"{COC_EMOJIS['defense_category']} Оборона",
+                callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:defense"
+            )],
+            [InlineKeyboardButton(
+                f"{COC_EMOJIS['army_category']} Армия",
+                callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:army"
+            )],
+            [InlineKeyboardButton(
+                f"{COC_EMOJIS['resource_category']} Ресурсы",
+                callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:resources"
+            )],
+            [InlineKeyboardButton(
+                f"{COC_EMOJIS['heroes_category']} Герои",
+                callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:heroes"
+            )],
+            [InlineKeyboardButton(
+                f"{COC_EMOJIS['builder_category']} Деревня строителя",
+                callback_data=f"{Keyboards.BUILDING_CATEGORY_CALLBACK}:builder"
+            )],
+            [InlineKeyboardButton(
+                f"{COC_EMOJIS['back']} Центр сообщества",
+                callback_data=Keyboards.COMMUNITY_CENTER_CALLBACK
+            )]
         ]
         return InlineKeyboardMarkup(keyboard)
     
@@ -660,12 +689,12 @@ class Keyboards:
             ]
         elif category == "resources":
             buildings = [
-                ("🥇 Золотая шахта", "gold_mine"),
-                ("💜 Накопитель эликсира", "elixir_collector"),
-                ("⚫ Бур тёмного эликсира", "dark_elixir_drill"),
-                ("🏛️ Хранилище золота", "gold_storage"),
-                ("🏛️ Хранилище эликсира", "elixir_storage"),
-                ("🏛️ Хранилище тёмного эликсира", "dark_elixir_storage")
+                (f"{COC_EMOJIS['gold']} Золотая шахта", "gold_mine"),
+                (f"{COC_EMOJIS['elixir']} Накопитель эликсира", "elixir_collector"),
+                (f"{COC_EMOJIS['dark_elixir']} Бур тёмного эликсира", "dark_elixir_drill"),
+                (f"{COC_EMOJIS['gold']} Хранилище золота", "gold_storage"),
+                (f"{COC_EMOJIS['elixir']} Хранилище эликсира", "elixir_storage"),
+                (f"{COC_EMOJIS['dark_elixir']} Хранилище тёмного эликсира", "dark_elixir_storage")
             ]
         elif category == "heroes":
             buildings = [
@@ -698,7 +727,12 @@ class Keyboards:
                                                   callback_data=f"{Keyboards.BUILDING_DETAIL_CALLBACK}:{building_id}"))
             keyboard.append(row)
         
-        keyboard.append([InlineKeyboardButton("⬅️ Категории", callback_data=Keyboards.BUILDING_COSTS_CALLBACK)])
+        keyboard.append([
+            InlineKeyboardButton(
+                f"{COC_EMOJIS['back']} Категории",
+                callback_data=Keyboards.BUILDING_COSTS_CALLBACK
+            )
+        ])
         return InlineKeyboardMarkup(keyboard)
 
     @staticmethod
@@ -716,7 +750,23 @@ class Keyboards:
                                                   callback_data=f"{Keyboards.BASE_LAYOUTS_TH_CALLBACK}:{th_level}"))
             keyboard.append(row)
         
-        keyboard.append([InlineKeyboardButton("⬅️ Центр сообщества", callback_data=Keyboards.COMMUNITY_CENTER_CALLBACK)])
+        keyboard.append([
+            InlineKeyboardButton(
+                f"{COC_EMOJIS['back']} Центр сообщества",
+                callback_data=Keyboards.COMMUNITY_CENTER_CALLBACK
+            )
+        ])
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def community_leagues_menu() -> InlineKeyboardMarkup:
+        """Клавиатура раздела лиг сообщества"""
+        keyboard = [
+            [InlineKeyboardButton(
+                f"{COC_EMOJIS['back']} Центр сообщества",
+                callback_data=Keyboards.COMMUNITY_CENTER_CALLBACK
+            )]
+        ]
         return InlineKeyboardMarkup(keyboard)
 
     @staticmethod

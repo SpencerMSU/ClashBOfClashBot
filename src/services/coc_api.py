@@ -226,17 +226,57 @@ class CocApiClient:
         if not is_valid:
             logger.error(f"Невалидный тег клана '{clan_tag}': {validation_message}")
             return None
-        
+
         formatted_tag = quote(clan_tag, safe='')
         endpoint = f"/clans/{formatted_tag}/warlog"
-        
+
         war_log = await self._make_request(endpoint)
         if war_log:
             logger.info(f"Получен журнал войн клана {clan_tag}")
         else:
             logger.warning(f"Не удалось получить журнал войн клана {clan_tag}")
-        
+
         return war_log
+
+    async def get_trophy_leagues(self, limit: int = 50) -> Optional[List[Dict[Any, Any]]]:
+        """Получение списка лиг основной деревни"""
+        endpoint = f"/leagues?limit={limit}"
+        leagues = await self._make_request(endpoint)
+        if leagues and 'items' in leagues:
+            logger.info("Получен список лиг основной деревни")
+            return leagues['items']
+        logger.warning("Не удалось получить список лиг основной деревни")
+        return None
+
+    async def get_builder_base_leagues(self, limit: int = 50) -> Optional[List[Dict[Any, Any]]]:
+        """Получение списка лиг деревни строителя"""
+        endpoint = f"/builderbaseleagues?limit={limit}"
+        leagues = await self._make_request(endpoint)
+        if leagues and 'items' in leagues:
+            logger.info("Получен список лиг деревни строителя")
+            return leagues['items']
+        logger.warning("Не удалось получить список лиг деревни строителя")
+        return None
+
+    async def get_capital_leagues(self, limit: int = 50) -> Optional[List[Dict[Any, Any]]]:
+        """Получение списка лиг столицы клана"""
+        endpoint = f"/capitalleagues?limit={limit}"
+        leagues = await self._make_request(endpoint)
+        if leagues and 'items' in leagues:
+            logger.info("Получен список лиг столицы клана")
+            return leagues['items']
+        logger.warning("Не удалось получить список лиг столицы клана")
+        return None
+
+    async def get_war_leagues(self, limit: int = 50) -> Optional[List[Dict[Any, Any]]]:
+        """Получение списка лиг войн кланов"""
+        endpoint = f"/warleagues?limit={limit}"
+        leagues = await self._make_request(endpoint)
+        if leagues and 'items' in leagues:
+            logger.info("Получен список лиг войн кланов")
+            return leagues['items']
+        logger.warning("Не удалось получить список лиг войн кланов")
+        return None
     
     async def get_clan_war_league_group(self, clan_tag: str) -> Optional[Dict[Any, Any]]:
         """Получение информации о группе Лиги войн кланов"""

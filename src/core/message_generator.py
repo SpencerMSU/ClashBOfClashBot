@@ -12,6 +12,7 @@ from telegram.constants import ParseMode
 from src.services.database import DatabaseService
 from src.services.coc_api import CocApiClient, format_clan_tag, format_player_tag
 from src.core.keyboards import Keyboards, WarSort, MemberSort, MemberView
+from src.core.game_emojis import COC_EMOJIS, get_league_icon
 from src.models.user import User
 from src.models.user_profile import UserProfile
 from src.core.user_state import UserState
@@ -24,6 +25,38 @@ logger = logging.getLogger(__name__)
 
 class MessageGenerator:
     """Генератор сообщений и форматирование данных"""
+
+    KNOWN_TROPHY_LEAGUES = {
+        'Bronze League III', 'Bronze League II', 'Bronze League I',
+        'Silver League III', 'Silver League II', 'Silver League I',
+        'Gold League III', 'Gold League II', 'Gold League I',
+        'Crystal League III', 'Crystal League II', 'Crystal League I',
+        'Master League III', 'Master League II', 'Master League I',
+        'Champion League III', 'Champion League II', 'Champion League I',
+        'Titan League III', 'Titan League II', 'Titan League I',
+        'Legend League'
+    }
+
+    KNOWN_WAR_LEAGUES = {
+        'Bronze League I', 'Bronze League II', 'Bronze League III',
+        'Silver League I', 'Silver League II', 'Silver League III',
+        'Gold League I', 'Gold League II', 'Gold League III',
+        'Crystal League I', 'Crystal League II', 'Crystal League III',
+        'Master League I', 'Master League II', 'Master League III',
+        'Champion League I', 'Champion League II', 'Champion League III'
+    }
+
+    KNOWN_BUILDER_LEAGUES = {
+        'Wood League', 'Stone League', 'Copper League', 'Brass League',
+        'Iron League', 'Steel League', 'Titanium League', 'Platinum League',
+        'Emerald League', 'Ruby League', 'Diamond League', 'Mythic League',
+        'Legend League'
+    }
+
+    KNOWN_CAPITAL_LEAGUES = {
+        'Capital League I', 'Capital League II', 'Capital League III',
+        'Capital League IV', 'Capital League V'
+    }
     
     def __init__(self, db_service: DatabaseService, coc_client: CocApiClient):
         self.db_service = db_service
@@ -2419,15 +2452,15 @@ class MessageGenerator:
         """Обработка меню центра сообщества"""
         try:
             message = (
-                f"🏛️ <b>Центр сообщества</b>\n\n"
-                f"Добро пожаловать в центр сообщества! Здесь вы можете найти полезную информацию "
-                f"о игре Clash of Clans.\n\n"
-                f"📋 <b>Доступные разделы:</b>\n"
-                f"• 🏗️ Стоимости строений - узнайте стоимость и время улучшения всех зданий\n"
-                f"• 🏰 Расстановки баз - лучшие базы для каждого уровня ТХ\n"
-                f"• Больше разделов будет добавлено в будущем!"
+                f"{COC_EMOJIS['community']} <b>Центр сообщества</b>\n\n"
+                f"Добро пожаловать! Здесь собрана актуальная информация по Clash of Clans.\n\n"
+                f"{COC_EMOJIS['section']} <b>Доступные разделы:</b>\n"
+                f"{COC_EMOJIS['bullet']} {COC_EMOJIS['building_costs']} Стоимости строений — цены и время улучшений\n"
+                f"{COC_EMOJIS['bullet']} {COC_EMOJIS['base_layouts']} Расстановки баз — подборка схем по уровням ТХ\n"
+                f"{COC_EMOJIS['bullet']} {COC_EMOJIS['leagues']} Новые лиги — свежие изменения и требования\n"
+                f"{COC_EMOJIS['tip']} Больше разделов будет добавлено в будущих обновлениях!"
             )
-            
+
             keyboard = Keyboards.community_center_menu()
             
             if hasattr(update, 'callback_query') and update.callback_query:
@@ -2455,13 +2488,13 @@ class MessageGenerator:
         """Обработка меню стоимости строений"""
         try:
             message = (
-                f"🏗️ <b>Стоимости строений</b>\n\n"
-                f"Выберите категорию зданий, чтобы узнать стоимость и время улучшения:\n\n"
-                f"🏰 <b>Оборона</b> - оборонительные здания\n"
-                f"⚔️ <b>Армия</b> - военные здания\n"
-                f"💎 <b>Ресурсы</b> - добывающие и хранящие здания\n"
-                f"👑 <b>Герои</b> - информация об улучшении героев\n"
-                f"🔨 <b>Деревня строителя</b> - здания второй деревни"
+                f"{COC_EMOJIS['building_costs']} <b>Стоимости строений</b>\n\n"
+                f"Выберите категорию, чтобы посмотреть требования по ресурсам и времени:\n\n"
+                f"{COC_EMOJIS['defense_category']} <b>Оборона</b> — защитные здания\n"
+                f"{COC_EMOJIS['army_category']} <b>Армия</b> — здания подготовки войск\n"
+                f"{COC_EMOJIS['resource_category']} <b>Ресурсы</b> — добыча и хранение {COC_EMOJIS['gold']} {COC_EMOJIS['elixir']} {COC_EMOJIS['dark_elixir']}\n"
+                f"{COC_EMOJIS['heroes_category']} <b>Герои</b> — апгрейды героев и их стоимости\n"
+                f"{COC_EMOJIS['builder_category']} <b>Деревня строителя</b> — вторая база"
             )
             
             keyboard = Keyboards.building_costs_menu()
@@ -2475,20 +2508,67 @@ class MessageGenerator:
         except Exception as e:
             logger.error(f"Ошибка при обработке меню стоимости строений: {e}")
             await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке меню.")
-    
+
+    async def handle_community_leagues_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка раздела с информацией о лигах"""
+        try:
+            async with self.coc_client as client:
+                trophy_task = asyncio.create_task(client.get_trophy_leagues())
+                builder_task = asyncio.create_task(client.get_builder_base_leagues())
+                capital_task = asyncio.create_task(client.get_capital_leagues())
+                war_task = asyncio.create_task(client.get_war_leagues())
+
+                trophy_leagues, builder_leagues, capital_leagues, war_leagues = await asyncio.gather(
+                    trophy_task, builder_task, capital_task, war_task
+                )
+
+            trophy_leagues = trophy_leagues or []
+            builder_leagues = builder_leagues or []
+            capital_leagues = capital_leagues or []
+            war_leagues = war_leagues or []
+
+            message = self._format_league_overview(
+                trophy_leagues, builder_leagues, capital_leagues, war_leagues
+            )
+
+            keyboard = Keyboards.community_leagues_menu()
+
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(
+                    text=message,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+            else:
+                await update.message.reply_text(
+                    text=message,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+
+        except Exception as e:
+            logger.error(f"Ошибка при загрузке информации о лигах: {e}")
+            error_message = (
+                f"{COC_EMOJIS['info']} Не удалось загрузить данные о лигах. Попробуйте ещё раз позже."
+            )
+            if hasattr(update, 'callback_query') and update.callback_query:
+                await update.callback_query.edit_message_text(error_message)
+            else:
+                await update.message.reply_text(error_message)
+
     async def handle_building_category_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, category: str):
         """Обработка меню категории зданий"""
         try:
             category_names = {
-                "defense": "🏰 Оборонительные здания",
-                "army": "⚔️ Военные здания",
-                "resources": "💎 Ресурсные здания",
-                "heroes": "👑 Герои",
-                "builder": "🔨 Деревня строителя"
+                "defense": f"{COC_EMOJIS['defense_category']} Оборонительные здания",
+                "army": f"{COC_EMOJIS['army_category']} Военные здания",
+                "resources": f"{COC_EMOJIS['resource_category']} Ресурсные здания",
+                "heroes": f"{COC_EMOJIS['heroes_category']} Герои",
+                "builder": f"{COC_EMOJIS['builder_category']} Деревня строителя"
             }
-            
+
             category_name = category_names.get(category, "Неизвестная категория")
-            
+
             message = (
                 f"<b>{category_name}</b>\n\n"
                 f"Выберите здание, чтобы посмотреть подробную информацию "
@@ -2598,7 +2678,7 @@ class MessageGenerator:
                         keyboard.append(quick_nav)
                 
                 # Добавляем информацию о уровнях
-                info_text = f"💡 Всего уровней: {total_levels}"
+                info_text = f"{COC_EMOJIS['info']} Всего уровней: {total_levels}"
                 if building_id == 'barbarian_king':
                     info_text += " (макс. 80)"
                 elif building_id == 'archer_queen':
@@ -2611,8 +2691,12 @@ class MessageGenerator:
                 message += f"\n\n{info_text}"
             
             # Кнопка возврата
-            keyboard.append([InlineKeyboardButton("⬅️ Назад", 
-                                                callback_data=Keyboards.BUILDING_COSTS_CALLBACK)])
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{COC_EMOJIS['back']} Назад",
+                    callback_data=Keyboards.BUILDING_COSTS_CALLBACK
+                )
+            ])
             
             keyboard_markup = InlineKeyboardMarkup(keyboard)
             
@@ -2630,10 +2714,9 @@ class MessageGenerator:
         """Обработка меню расстановок баз"""
         try:
             message = (
-                f"🏰 <b>Расстановки баз</b>\n\n"
-                f"Выберите уровень ратуши для просмотра лучших расстановок баз:\n\n"
-                f"💡 <i>Здесь будут представлены проверенные расстановки баз "
-                f"для каждого уровня ТХ с подробными описаниями и стратегиями.</i>"
+                f"{COC_EMOJIS['base_layouts']} <b>Расстановки баз</b>\n\n"
+                f"Выберите уровень ратуши, чтобы получить подборку лучших схем:\n\n"
+                f"{COC_EMOJIS['info']} <i>Мы собираем только проверенные варианты с рекомендациями по защите и фарму.</i>"
             )
             
             keyboard = Keyboards.base_layouts_menu()
@@ -2663,19 +2746,19 @@ class MessageGenerator:
         """Обработка выбора уровня ТХ для расстановок"""
         try:
             message = (
-                f"🏰 <b>Расстановки баз - ТХ {th_level}</b>\n\n"
-                f"🚧 <b>В разработке</b>\n\n"
+                f"{COC_EMOJIS['base_layouts']} <b>Расстановки баз - ТХ {th_level}</b>\n\n"
+                f"{COC_EMOJIS['under_construction']} <b>Раздел в разработке</b>\n\n"
                 f"Этот раздел находится в стадии разработки. Скоро здесь будут доступны:\n\n"
-                f"• 🛡️ Лучшие защитные базы\n"
-                f"• ⚔️ Фарм базы\n"
-                f"• 🏆 Трофейные базы\n"
-                f"• 🔥 Военные базы\n\n"
+                f"{COC_EMOJIS['bullet']} {COC_EMOJIS['defense_category']} Лучшие защитные базы\n"
+                f"{COC_EMOJIS['bullet']} {COC_EMOJIS['army_category']} Фарм базы\n"
+                f"{COC_EMOJIS['bullet']} {COC_EMOJIS['leagues']} Трофейные базы\n"
+                f"{COC_EMOJIS['bullet']} {COC_EMOJIS['war_league']} Военные базы\n\n"
                 f"Следите за обновлениями!"
             )
-            
+
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("⬅️ Назад к выбору ТХ", callback_data=Keyboards.BASE_LAYOUTS_CALLBACK)],
-                [InlineKeyboardButton("🏛️ Центр сообщества", callback_data=Keyboards.COMMUNITY_CENTER_CALLBACK)]
+                [InlineKeyboardButton(f"{COC_EMOJIS['community']} Центр сообщества", callback_data=Keyboards.COMMUNITY_CENTER_CALLBACK)]
             ])
             
             await update.callback_query.edit_message_text(
@@ -2687,8 +2770,86 @@ class MessageGenerator:
         except Exception as e:
             logger.error(f"Ошибка при обработке ТХ {th_level} расстановок: {e}")
             await update.callback_query.edit_message_text("❌ Произошла ошибка при загрузке расстановок.")
-    
-    async def handle_achievements_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE, 
+
+    def _format_league_overview(self,
+                                trophy_leagues: List[Dict[Any, Any]],
+                                builder_leagues: List[Dict[Any, Any]],
+                                capital_leagues: List[Dict[Any, Any]],
+                                war_leagues: List[Dict[Any, Any]]) -> str:
+        """Форматирование информации о текущих и новых лигах"""
+        message_parts = [
+            f"{COC_EMOJIS['leagues']} <b>Обновления лиг</b>",
+            "",
+            f"{COC_EMOJIS['info']} Список формируется на основе данных официального API Clash of Clans."
+        ]
+
+        def append_section(icon_key: str, title: str,
+                           leagues: List[Dict[Any, Any]], known_set: set,
+                           fallback_key: str):
+            if not leagues:
+                return
+
+            new_leagues = self._find_new_leagues(leagues, known_set)
+            message_parts.append("")
+
+            if new_leagues:
+                message_parts.append(
+                    f"{COC_EMOJIS[icon_key]} <b>{title} — новые</b>"
+                )
+                message_parts.extend(
+                    self._render_league_entries(new_leagues, fallback_key, highlight_new=True)
+                )
+            else:
+                message_parts.append(f"{COC_EMOJIS[icon_key]} <b>{title}</b>")
+                message_parts.extend(
+                    self._render_league_entries(self._select_top_leagues(leagues), fallback_key)
+                )
+
+        append_section('trophy_league', 'Лиги деревни', trophy_leagues,
+                       self.KNOWN_TROPHY_LEAGUES, 'trophy_league')
+        append_section('builder_league', 'Лиги деревни строителя', builder_leagues,
+                       self.KNOWN_BUILDER_LEAGUES, 'builder_league')
+        append_section('capital_league', 'Лиги столицы клана', capital_leagues,
+                       self.KNOWN_CAPITAL_LEAGUES, 'capital_league')
+        append_section('war_league', 'Лиги войн кланов', war_leagues,
+                       self.KNOWN_WAR_LEAGUES, 'war_league')
+
+        if len(message_parts) <= 3:
+            message_parts.append("")
+            message_parts.append(
+                f"{COC_EMOJIS['note']} Не удалось получить список лиг. Попробуйте позже."
+            )
+        else:
+            message_parts.append("")
+            message_parts.append(
+                f"{COC_EMOJIS['note']} Новые лиги помечаются значком {COC_EMOJIS['new']}."
+            )
+
+        return "\n".join(message_parts)
+
+    @staticmethod
+    def _find_new_leagues(leagues: List[Dict[Any, Any]], known_set: set) -> List[Dict[Any, Any]]:
+        """Определяет новые лиги, которых ранее не было в списке"""
+        return [league for league in leagues if league.get('name') not in known_set]
+
+    @staticmethod
+    def _select_top_leagues(leagues: List[Dict[Any, Any]], limit: int = 5) -> List[Dict[Any, Any]]:
+        """Возвращает верхние лиги по их идентификатору"""
+        sorted_leagues = sorted(leagues, key=lambda x: x.get('id', 0), reverse=True)
+        return sorted_leagues[:limit]
+
+    def _render_league_entries(self, leagues: List[Dict[Any, Any]],
+                               fallback_key: str, highlight_new: bool = False) -> List[str]:
+        """Формирует строки для отображения списка лиг"""
+        lines = []
+        for league in leagues:
+            name = league.get('name', 'Неизвестно')
+            icon = get_league_icon(name, fallback_key)
+            new_marker = f" {COC_EMOJIS['new']}" if highlight_new else ""
+            lines.append(f"{COC_EMOJIS['bullet']} {icon} <b>{name}</b>{new_marker}")
+        return lines
+
+    async def handle_achievements_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
                                      player_tag: str, page: int = 1, sort_type: str = "progress"):
         """Обработка меню достижений игрока"""
         try:
