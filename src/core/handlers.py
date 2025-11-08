@@ -487,6 +487,8 @@ class CallbackHandler:
             
             elif callback_type == Keyboards.COMMUNITY_CENTER_CALLBACK:
                 await self._handle_community_center(update, context)
+            elif callback_type == Keyboards.COMMUNITY_LEAGUES_CALLBACK:
+                await self._handle_community_leagues(update, context)
             
             elif callback_type == Keyboards.BUILDING_COSTS_CALLBACK:
                 await self._handle_building_costs(update, context)
@@ -860,7 +862,11 @@ class CallbackHandler:
     async def _handle_community_center(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка центра сообщества"""
         await self.message_generator.handle_community_center_menu(update, context)
-    
+
+    async def _handle_community_leagues(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработка раздела лиг сообщества"""
+        await self.message_generator.handle_community_leagues_menu(update, context)
+
     async def _handle_building_costs(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработка меню стоимости строений"""
         await self.message_generator.handle_building_costs_menu(update, context)
