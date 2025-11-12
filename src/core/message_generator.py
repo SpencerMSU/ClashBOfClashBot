@@ -3,6 +3,7 @@
 """
 import asyncio
 import logging
+import math
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone, timedelta
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -68,10 +69,10 @@ class MessageGenerator:
         self.WARS_PER_PAGE = 10
         
         self.ROLE_TRANSLATIONS = {
-            "leader": "👑 Глава",
-            "coLeader": "⚜️ Соруководитель", 
-            "admin": "🔰 Старейшина",
-            "member": "👤 Участник"
+            "leader": {"icon": "👑", "title": "Глава"},
+            "coLeader": {"icon": "⚜️", "title": "Соруководитель"},
+            "admin": {"icon": "🔰", "title": "Старейшина"},
+            "member": {"icon": "👤", "title": "Участник"}
         }
     
     def _format_datetime(self, iso_datetime_str: str) -> str:
@@ -618,19 +619,54 @@ class MessageGenerator:
             league_name = league.get('name', 'Неизвестно')
             message += f"🏅 Лига: {league_name}\n"
         
-        # Add builder hall information
+        # Add builder base information (supports both legacy versus data and new builder base leagues)
         builder_hall_level = player_data.get('builderHallLevel', 0)
-        versus_trophies = player_data.get('versusTrophies', 0)
-        best_versus_trophies = player_data.get('bestVersusTrophies', 0)
-        versus_battle_wins = player_data.get('versusBattleWins', 0)
-        
-        # Show builder base info if player has any builder base activity or level > 0
-        if builder_hall_level > 0 or versus_trophies > 0 or best_versus_trophies > 0 or versus_battle_wins > 0:
+        builder_base_trophies = player_data.get('builderBaseTrophies')
+        best_builder_base_trophies = player_data.get('builderBaseBestTrophies')
+        builder_base_battle_wins = player_data.get('builderBaseBattleWins')
+        builder_base_attack_wins = player_data.get('builderBaseAttackWins')
+        builder_base_defense_wins = player_data.get('builderBaseDefenseWins')
+        builder_base_win_streak = player_data.get('builderBaseWinStreak')
+        builder_base_league = player_data.get('builderBaseLeague', {})
+
+        # Fallbacks for legacy versus fields (until all accounts migrate)
+        if builder_base_trophies is None:
+            builder_base_trophies = player_data.get('versusTrophies', 0)
+        if best_builder_base_trophies is None:
+            best_builder_base_trophies = player_data.get('bestVersusTrophies', 0)
+        if builder_base_battle_wins is None:
+            builder_base_battle_wins = player_data.get('versusBattleWins')
+
+        show_builder_base = (
+            builder_hall_level > 0
+            or (builder_base_trophies or 0) > 0
+            or (best_builder_base_trophies or 0) > 0
+            or (builder_base_battle_wins or 0) > 0
+            or (builder_base_attack_wins or 0) > 0
+            or (builder_base_defense_wins or 0) > 0
+        )
+
+        if show_builder_base:
             message += f"\n🏗️ *База строителя:*\n"
             message += f"🏘️ Дом строителя: {builder_hall_level} уровень\n"
-            message += f"🏆 Трофеи против: {versus_trophies:,}\n"
-            message += f"🥇 Лучший результат против: {best_versus_trophies:,}\n"
-            message += f"⚔️ Побед против: {versus_battle_wins:,}\n"
+
+            if builder_base_league and builder_base_league.get('name'):
+                league_name = builder_base_league.get('name')
+                message += f"🏅 Лига Базы строителя: {league_name}\n"
+
+            if builder_base_trophies is not None:
+                message += f"🏆 Кубки: {builder_base_trophies:,}\n"
+            if best_builder_base_trophies is not None:
+                message += f"🥇 Лучший результат: {best_builder_base_trophies:,}\n"
+            if builder_base_win_streak is not None:
+                message += f"🔥 Серия побед: {builder_base_win_streak:,}\n"
+            if builder_base_attack_wins is not None:
+                message += f"⚔️ Побед в атаке: {builder_base_attack_wins:,}\n"
+            if builder_base_defense_wins is not None:
+                message += f"🛡️ Побед в защите: {builder_base_defense_wins:,}\n"
+            if builder_base_battle_wins is not None and builder_base_attack_wins is None:
+                # Показываем общее число побед, если новых метрик атак ещё нет
+                message += f"⚔️ Побед: {builder_base_battle_wins:,}\n"
         
         # Информация о клане
         clan_info = player_data.get('clan')
@@ -638,11 +674,13 @@ class MessageGenerator:
             clan_name = clan_info.get('name', 'Неизвестно')
             clan_tag = clan_info.get('tag', 'Неизвестно')
             clan_role = clan_info.get('role', 'member')
-            role_text = self.ROLE_TRANSLATIONS.get(clan_role, '👤 Участник')
-            
+            role_data = self.ROLE_TRANSLATIONS.get(clan_role, {"icon": "👤", "title": "Участник"})
+            role_icon = role_data.get('icon', '👤')
+            role_title = role_data.get('title', 'Участник')
+
             message += f"\n🛡 *Клан:* {clan_name}\n"
             message += f"🏷 `{clan_tag}`\n"
-            message += f"👑 Роль: {role_text}"
+            message += f"👑 Роль: {role_icon} {role_title}"
             
             # Add clan position if available
             clan_rank = player_data.get('clanRank')
@@ -661,13 +699,9 @@ class MessageGenerator:
     def _format_super_troops_info(self, player_data: Dict[Any, Any]) -> str:
         """Форматирование информации о супер войсках"""
         try:
-            troops = player_data.get('troops', [])
-            super_troops = []
-            
-            # Список известных супер войск с их обычными названиями  
             super_troop_names = {
                 'Super Barbarian': '⚔️ Супер варвар',
-                'Super Archer': '🏹 Супер лучница', 
+                'Super Archer': '🏹 Супер лучница',
                 'Super Giant': '🗿 Супер гигант',
                 'Sneaky Goblin': '👻 Скрытный гоблин',
                 'Super Wall Breaker': '💥 Супер стенобой',
@@ -679,101 +713,115 @@ class MessageGenerator:
                 'Ice Hound': '🧊 Ледяная гончая',
                 'Super Bowler': '🎳 Супер боулер',
                 'Super Dragon': '🐲 Супер дракон',
-                'Super Miner': '⛏️ Супер шахтер'
+                'Super Miner': '⛏️ Супер шахтер',
+                'Super Hog Rider': '🐗 Супер всадник на кабане',
+                'Super Ice Golem': '❄️ Супер ледяной голем'
             }
-            
-            # Ищем активные супер войска
-            for troop in troops:
-                troop_name = troop.get('name', '')
-                if troop_name in super_troop_names:
-                    level = troop.get('level', 0)
-                    max_level = troop.get('maxLevel', 0)
-                    village = troop.get('village', 'home')
-                    
-                    if village == 'home' and level > 0:  # Только войска основной деревни
-                        # Проверяем время активности супер войска
-                        remaining_time = self._calculate_super_troop_time(troop)
-                        
-                        # Добавляем только если супер войско действительно активно
-                        if remaining_time > 0:
-                            display_name = super_troop_names[troop_name]
-                            
-                            super_troops.append({
-                                'name': display_name,
-                                'level': level,
-                                'max_level': max_level,
-                                'remaining_time': remaining_time
-                            })
-            
-            if not super_troops:
+
+            active_super_troops: List[Dict[str, Any]] = []
+
+            # Основной источник - поле superTroops из API (содержит только активные войска)
+            super_troops_data = player_data.get('superTroops') or []
+
+            if not super_troops_data:
+                # Fallback для старых ответов API: ищем активные войска среди troops
+                super_troops_data = [
+                    troop for troop in player_data.get('troops', [])
+                    if troop.get('name') in super_troop_names
+                ]
+
+            for troop in super_troops_data:
+                name = troop.get('name')
+                if not name or name not in super_troop_names:
+                    continue
+
+                is_active = troop.get('isActive')
+                if is_active is None:
+                    is_active = troop.get('superTroopIsActive')
+
+                remaining_hours = self._calculate_super_troop_time(troop)
+
+                # Если API не сообщает явно активность, считаем войско активным
+                # когда оно присутствует в списке и время ещё не истекло
+                if is_active is False and (remaining_hours is None or remaining_hours <= 0):
+                    continue
+
+                level = troop.get('level', 0)
+                max_level = troop.get('maxLevel', level)
+
+                active_super_troops.append({
+                    'name': super_troop_names[name],
+                    'level': level,
+                    'max_level': max_level,
+                    'remaining_time': remaining_hours,
+                    'is_active': is_active if is_active is not None else True
+                })
+
+            if not active_super_troops:
                 return ""
-            
-            # Сортируем по времени (активные сначала)
-            super_troops.sort(key=lambda x: x['remaining_time'], reverse=True)
-            
-            message = "⚡ *Супер войска:*\n"
-            
-            # Показываем до 2 супер войск как СУПЕР ВОЙКО 1 и 2
-            for i, troop in enumerate(super_troops[:2], 1):
-                status = "Активно" if troop['remaining_time'] > 0 else "Неактивно"
-                time_text = f"{troop['remaining_time']}ч" if troop['remaining_time'] > 0 else "0ч"
-                
-                message += f"🔥 СУПЕР ВОЙКО {i}: {troop['name']}\n"
-                message += f"   📊 Уровень: {troop['level']}/{troop['max_level']}\n"
-                message += f"   ⏰ Время: {time_text} | {status}\n"
-            
-            # Если есть только одно супер войско, добавляем пустой слот
-            if len(super_troops) == 1:
-                message += f"🔥 СУПЕР ВОЙКО 2: Не активировано\n"
-                message += f"   📊 Уровень: 0/0\n"
-                message += f"   ⏰ Время: 0ч | Неактивно\n"
-            elif len(super_troops) == 0:
-                message += f"🔥 СУПЕР ВОЙКО 1: Не активировано\n"
-                message += f"   📊 Уровень: 0/0\n"
-                message += f"   ⏰ Время: 0ч | Неактивно\n"
-                message += f"🔥 СУПЕР ВОЙКО 2: Не активировано\n"
-                message += f"   📊 Уровень: 0/0\n"
-                message += f"   ⏰ Время: 0ч | Неактивно\n"
-            
-            return message
-            
+
+            # Сортируем по времени действия: сначала те, у кого осталось больше часов
+            active_super_troops.sort(
+                key=lambda x: (-1 if x['remaining_time'] is None else x['remaining_time']),
+                reverse=True
+            )
+
+            message_lines = ["⚡ *Супер войска:*"]
+
+            for i, troop in enumerate(active_super_troops[:2], 1):
+                remaining = troop['remaining_time']
+                if remaining is None:
+                    time_text = "⏰ Осталось: неизвестно"
+                else:
+                    time_text = f"⏰ Осталось: {remaining}ч"
+
+                status = "Активно" if troop['is_active'] else "Неактивно"
+
+                message_lines.append(f"🔥 Супер войско {i}: {troop['name']}")
+                message_lines.append(f"   📊 Уровень: {troop['level']}/{troop['max_level']}")
+                message_lines.append(f"   {time_text} | {status}")
+
+            if len(active_super_troops) == 1:
+                message_lines.append("🔥 Супер войско 2: Не активировано")
+                message_lines.append("   📊 Уровень: 0/0")
+                message_lines.append("   ⏰ Осталось: 0ч | Неактивно")
+
+            return "\n".join(message_lines)
+
         except Exception as e:
             logger.error(f"Ошибка при форматировании супер войск: {e}")
             return ""
-    
-    def _calculate_super_troop_time(self, troop: Dict) -> int:
-        """Расчет оставшегося времени супер войска"""
+
+    def _calculate_super_troop_time(self, troop: Dict) -> Optional[int]:
+        """Расчет оставшегося времени супер войска в часах"""
         try:
-            # Проверяем, есть ли информация о супер режиме
-            # В реальном COC API информация о супер войсках может содержать время активации
-            level = troop.get('level', 0)
-            
-            # Если войско не прокачено, оно точно не активно
-            if level == 0:
-                return 0
-            
-            # Проверяем, есть ли поле superTroopIsActive или подобное
-            # В разных версиях API это может называться по-разному
-            is_active = troop.get('superTroopIsActive', False)
-            if isinstance(is_active, bool) and is_active:
-                # Если есть явное указание на активность, возвращаем время
-                remaining_time = troop.get('superTroopRemainingTime', 72)  # По умолчанию 72 часа
-                return max(0, remaining_time)
-            
-            # Если нет явной информации об активности, проверяем косвенные признаки
-            # Супер войска обычно имеют особые характеристики
-            max_level = troop.get('maxLevel', 0)
-            
-            # Если текущий уровень равен максимальному и больше базового уровня
-            # для обычных войск, вероятно это активное супер войско
-            if level > 0 and level == max_level and max_level > 25:  # Супер войска обычно высокого уровня
-                # Возвращаем фиксированное время для активных супер войск
-                return 48  # 48 часов как примерное время
-            
-            return 0
-                
+            if 'superTroopRemainingTime' in troop:
+                remaining = troop.get('superTroopRemainingTime')
+                if isinstance(remaining, (int, float)):
+                    return max(0, int(remaining))
+
+            if 'superTroopSecondsRemaining' in troop:
+                seconds_remaining = troop.get('superTroopSecondsRemaining')
+                if isinstance(seconds_remaining, (int, float)):
+                    return max(0, int(math.ceil(seconds_remaining / 3600)))
+
+            time_key = None
+            if 'superTroopTime' in troop:
+                time_key = troop['superTroopTime']
+            elif 'superTroopBoostTime' in troop:
+                time_key = troop['superTroopBoostTime']
+
+            if time_key:
+                expiry = datetime.fromisoformat(str(time_key).replace('Z', '+00:00'))
+                remaining_delta = expiry - datetime.now(timezone.utc)
+                if remaining_delta.total_seconds() <= 0:
+                    return 0
+                return int(math.ceil(remaining_delta.total_seconds() / 3600))
+
+            return None
+
         except Exception:
-            return 0
+            return None
     
     def _format_clan_info(self, clan_data: Dict[Any, Any]) -> str:
         """Форматирование информации о клане"""
@@ -817,7 +865,10 @@ class MessageGenerator:
             name = member.get('name', 'Неизвестно').replace('*', '\\*').replace('_', '\\_').replace('[', '\\[').replace(']', '\\]').replace('`', '\\`')
             tag = member.get('tag', 'Неизвестно')
             role = member.get('role', 'member')
-            role_text = self.ROLE_TRANSLATIONS.get(role, '👤 Участник')
+            role_info = self.ROLE_TRANSLATIONS.get(role, {"icon": "👤", "title": "Участник"})
+            role_icon = role_info.get('icon', '👤')
+            role_title = role_info.get('title', 'Участник')
+            role_text = f"{role_icon} {role_title}"
             trophies = member.get('trophies', 0)
             
             if view_type == MemberView.DETAILED:
@@ -826,7 +877,7 @@ class MessageGenerator:
                 
                 message += f"*{i + (page-1) * self.MEMBERS_PER_PAGE}.* {name}\n"
                 message += f"   🏷 `{tag}`\n"
-                message += f"   👑 {role_text}\n"
+                message += f"   👑 {role_icon} {role_title}\n"
                 message += f"   🏆 {trophies:,} трофеев\n"
                 message += f"   📤 Отдано: {donations:,}\n"
                 message += f"   📥 Получено: {received:,}\n\n"
